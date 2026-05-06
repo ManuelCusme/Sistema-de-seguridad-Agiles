@@ -1,7 +1,6 @@
 -- ============================================================
 -- SISTEMA DE SEGURIDAD UTA - Script de Base de Datos
 -- Sprint 1 - Manuel Cusme
--- Sincronizado con Entities.cs
 -- ============================================================
 
 USE master;
@@ -17,7 +16,7 @@ USE SeguridadUtaDB;
 GO
 
 -- ============================================================
--- TABLA: Users (sincronizada con Entities.cs)
+-- TABLA: Users
 -- ============================================================
 IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Users]') AND type = N'U')
 BEGIN
@@ -56,7 +55,7 @@ END
 GO
 
 -- ============================================================
--- TABLA: Incidents (sincronizada con Entities.cs)
+-- TABLA: Incidents
 -- ============================================================
 IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Incidents]') AND type = N'U')
 BEGIN
