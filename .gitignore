@@ -1,0 +1,18 @@
+## Directorios de compilación de .NET
+bin/
+obj/
+
+## Archivos de usuario de Visual Studio
+*.user
+*.suo
+.vs/
+
+## Archivos de entorno
+.env
+.env.*
+
+## Logs
+*.log
+
+## Paquetes NuGet (se restauran automáticamente)
+packages/
