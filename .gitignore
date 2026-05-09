@@ -16,3 +16,4 @@ obj/
 
 ## Paquetes NuGet (se restauran automáticamente)
 packages/
+node_modules
