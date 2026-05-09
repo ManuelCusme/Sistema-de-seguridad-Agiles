@@ -512,25 +512,305 @@ Hemos migrado y desacoplado la lógica monolítica del prototipo original (`Segu
     *   *Resultado:* Debe retornar HTTP `200 OK` y emitir el objeto a través de WebSockets en `ws://localhost:5000/hubs/alerts` hacia todos los clientes de escucha React / React Native.
 ```
 
+## 📐 6. NUEVA TAREA C: [SCRUM-5] Microservicio de Identidad (`UtaSecurity.Services.Identity`)
+Gestiona el registro, autenticación y generación de tokens JWT de los usuarios institucionales en el puerto **5001**.
+
+### Paso C.1: Creación del Proyecto
+```powershell
+# Volver a src/
+cd src/
+
+# Crear Web API de Identidad
+dotnet new webapi -n UtaSecurity.Services.Identity --framework "net10.0"
+cd UtaSecurity.Services.Identity
+
+# Instalar paquetes requeridos para seguridad y JWT
+dotnet add package BCrypt.Net-Next
+dotnet add package System.IdentityModel.Tokens.Jwt
+dotnet add package Microsoft.IdentityModel.Tokens
+```
+
+### Paso C.2: Modelo de Datos y DTOs (`Models/UserModels.cs`)
+Aplica de manera estricta la nomenclatura con el prefijo `usu` + CamelCase:
+```csharp
+namespace UtaSecurity.Services.Identity.Models
+{
+    public class UserEntity
+    {
+        public string usuId { get; set; } = Guid.NewGuid().ToString();
+        public string usuNombre1 { get; set; } = string.Empty;
+        public string? usuNombre2 { get; set; }
+        public string usuApellido1 { get; set; } = string.Empty;
+        public string? usuApellido2 { get; set; }
+        public string usuEmail { get; set; } = string.Empty;
+        public string usuPasswordHash { get; set; } = string.Empty;
+        public DateTime usuBirthDate { get; set; }
+        public string usuRole { get; set; } = "Estudiante"; // Admin, Estudiante, Guardia
+        public string usuFacultad { get; set; } = "FISEI";
+        public bool usuIsActive { get; set; } = true;
+        public DateTime usuCreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    public class UserRegisterDto
+    {
+        public string usuNombre1 { get; set; } = string.Empty;
+        public string? usuNombre2 { get; set; }
+        public string usuApellido1 { get; set; } = string.Empty;
+        public string? usuApellido2 { get; set; }
+        public string usuEmail { get; set; } = string.Empty;
+        public string usuPassword { get; set; } = string.Empty;
+        public DateTime usuBirthDate { get; set; }
+        public string usuFacultad { get; set; } = "FISEI";
+    }
+
+    public class UserLoginDto
+    {
+        public string usuEmail { get; set; } = string.Empty;
+        public string usuPassword { get; set; } = string.Empty;
+    }
+
+    public class UserAuthResponseDto
+    {
+        public string usuToken { get; set; } = string.Empty;
+        public string usuId { get; set; } = string.Empty;
+        public string usuNombreCompleto { get; set; } = string.Empty;
+        public string usuEmail { get; set; } = string.Empty;
+        public string usuRole { get; set; } = string.Empty;
+        public string usuFacultad { get; set; } = string.Empty;
+    }
+}
+```
+
+### Paso C.3: Controlador de Autenticación (`Controllers/IdentityController.cs`)
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using UtaSecurity.Services.Identity.Models;
+
+namespace UtaSecurity.Services.Identity.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class IdentityController : ControllerBase
+    {
+        // Almacenamiento estático en memoria para simular base de datos persistente (Sprint 1)
+        private static readonly List<UserEntity> _usuariosBD = new();
+        private readonly IConfiguration _config;
+        private const string SecretKey = "SuperSecretSecurityKeyForUtaSecuritySystem2026"; // Clave desarrollo
+
+        public IdentityController(IConfiguration config)
+        {
+            _config = config;
+            // Sembrar usuarios iniciales (Seeding) si la lista está vacía
+            if (!_usuariosBD.Any())
+            {
+                SeedUsers();
+            }
+        }
+
+        [HttpPost("register")]
+        public IActionResult Register([FromBody] UserRegisterDto dto)
+        {
+            if (string.IsNullOrEmpty(dto.usuEmail) || string.IsNullOrEmpty(dto.usuPassword))
+            {
+                return BadRequest(new { error = "El email y la contraseña son requeridos." });
+            }
+
+            // Validar si el correo ya existe
+            if (_usuariosBD.Any(u => u.usuEmail.Equals(dto.usuEmail, StringComparison.OrdinalIgnoreCase)))
+            {
+                return BadRequest(new { error = "El correo ya se encuentra registrado." });
+            }
+
+            // Validar edad (mayor a 13 años)
+            var edad = DateTime.UtcNow.Year - dto.usuBirthDate.Year;
+            if (dto.usuBirthDate > DateTime.UtcNow.AddYears(-edad)) edad--;
+            if (edad < 13)
+            {
+                return BadRequest(new { error = "La edad mínima de registro es de 13 años." });
+            }
+
+            var nuevoUsuario = new UserEntity
+            {
+                usuNombre1 = dto.usuNombre1,
+                usuNombre2 = dto.usuNombre2,
+                usuApellido1 = dto.usuApellido1,
+                usuApellido2 = dto.usuApellido2,
+                usuEmail = dto.usuEmail,
+                usuPasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.usuPassword),
+                usuBirthDate = dto.usuBirthDate,
+                usuRole = "Estudiante", // Rol predeterminado
+                usuFacultad = dto.usuFacultad
+            };
+
+            _usuariosBD.Add(nuevoUsuario);
+
+            return Ok(new { mensaje = "Usuario registrado exitosamente." });
+        }
+
+        [HttpPost("login")]
+        public IActionResult Login([FromBody] UserLoginDto dto)
+        {
+            var usuario = _usuariosBD.FirstOrDefault(u => u.usuEmail.Equals(dto.usuEmail, StringComparison.OrdinalIgnoreCase));
+            if (usuario == null || !BCrypt.Net.BCrypt.Verify(dto.usuPassword, usuario.usuPasswordHash))
+            {
+                return Unauthorized(new { error = "Credenciales incorrectas." });
+            }
+
+            if (!usuario.usuIsActive)
+            {
+                return BadRequest(new { error = "La cuenta está desactivada." });
+            }
+
+            // Generación de Token JWT
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.UTF8.GetBytes(SecretKey);
+            var nombreCompleto = $"{usuario.usuNombre1} {usuario.usuApellido1}".Trim();
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimTypes.NameIdentifier, usuario.usuId),
+                    new Claim(ClaimTypes.Email, usuario.usuEmail),
+                    new Claim(ClaimTypes.Role, usuario.usuRole),
+                    new Claim("NombreCompleto", nombreCompleto),
+                    new Claim("Facultad", usuario.usuFacultad)
+                }),
+                Expires = DateTime.UtcNow.AddDays(7), // Expira en 7 días
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            var tokenString = tokenHandler.WriteToken(token);
+
+            return Ok(new UserAuthResponseDto
+            {
+                usuToken = tokenString,
+                usuId = usuario.usuId,
+                usuNombreCompleto = nombreCompleto,
+                usuEmail = usuario.usuEmail,
+                usuRole = usuario.usuRole,
+                usuFacultad = usuario.usuFacultad
+            });
+        }
+
+        private static void SeedUsers()
+        {
+            // 1 Admin
+            _usuariosBD.Add(new UserEntity
+            {
+                usuId = Guid.NewGuid().ToString(),
+                usuNombre1 = "Administrador",
+                usuApellido1 = "Central",
+                usuEmail = "admin@uta.edu.ec",
+                usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("admin123"),
+                usuRole = "Admin",
+                usuFacultad = "DITIC"
+            });
+
+            // 5 Estudiantes
+            for (int i = 1; i <= 5; i++)
+            {
+                _usuariosBD.Add(new UserEntity
+                {
+                    usuId = Guid.NewGuid().ToString(),
+                    usuNombre1 = "Estudiante",
+                    usuApellido1 = i.ToString(),
+                    usuEmail = $"estudiante{i}@uta.edu.ec",
+                    usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("123456"),
+                    usuRole = "Estudiante",
+                    usuFacultad = "FISEI"
+                });
+            }
+
+            // 5 Guardias
+            for (int i = 1; i <= 5; i++)
+            {
+                _usuariosBD.Add(new UserEntity
+                {
+                    usuId = Guid.NewGuid().ToString(),
+                    usuNombre1 = "Guardia",
+                    usuApellido1 = i.ToString(),
+                    usuEmail = $"guardia{i}@uta.edu.ec",
+                    usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("123456"),
+                    usuRole = "Guardia",
+                    usuFacultad = "Seguridad"
+                });
+            }
+        }
+    }
+}
+```
+
+### Paso C.4: Configuración `Program.cs` del Microservicio de Identidad
+Configura la inyección de controladores, CORS y mapeo en el puerto **`5001`**.
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllers();
+
+// Política de CORS compatible con móvil y web
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("IdentityCorsPolicy", policy =>
+    {
+        policy.WithOrigins(
+                "http://localhost:5000", // API Gateway
+                "http://localhost:5173", // React Web
+                "http://localhost:8081"  // React Native Metro
+            )
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
+    });
+});
+
+var app = builder.Build();
+
+app.UseCors("IdentityCorsPolicy");
+app.UseRouting();
+app.UseAuthorization();
+
+app.MapControllers();
+
+app.Run();
+```
+
+Fijar puerto `5001` por defecto en su `launchSettings.json`.
+
 ---
 
-## 🔍 7. GUÍA DE TRANSFERENCIA Y CONTINUIDAD (PARA OTRO AGENTE)
+## 📂 7. NUEVA TAREA D: [SCRUM-6] Creación de Solución Unificada (.sln)
+Consolida el repositorio organizando todos los servicios bajo una única solución de Visual Studio para una carga masiva simple:
 
-Si estás asumiendo la continuidad de este proyecto debido a límites de cuota/créditos de IA, sigue estas directrices para mantener la integridad técnica:
+```powershell
+# En la raíz del repositorio d:\SistemaSeguridad
+dotnet new sln -n UtaSecurity
 
-### Próximos Pasos en el Roadmap
-1.  **Implementar MS-A (Identity - Puerto 5001):**
-    *   Migrar la lógica de autenticación de `AuthController.cs` del prototipo original.
-    *   Utilizar base de datos independiente y aplicar nomenclatura de 3 letras con prefijo `usu` (ej: `usuId`, `usuNombre1`, `usuEmail`, `usuPasswordHash`).
-    *   Utilizar BCrypt y firmar el JWT con claims.
-2.  **Migrar e Integrar Base de Datos en MS-C (Incidents):**
-    *   Migrar `ApplicationDbContext` para persistir los incidentes en base de datos.
-    *   Integrar geolocalización Haversine en una capa de servicio desacoplada para resolver la geocerca de forma automática como hacía el controlador del prototipo.
-3.  **Configurar Variables de Entorno:**
-    *   Extraer valores de coordenadas de geocercas y claves de firma JWT a archivos `appsettings.json`.
+# Agregar los tres proyectos a la solución
+dotnet sln UtaSecurity.sln add src/UtaSecurity.Gateway/UtaSecurity.Gateway.csproj
+dotnet sln UtaSecurity.sln add src/UtaSecurity.Services.Incidents/UtaSecurity.Services.Incidents.csproj
+dotnet sln UtaSecurity.sln add src/UtaSecurity.Services.Identity/UtaSecurity.Services.Identity.csproj
+```
 
-### Reglas que Debes Mantener
-*   **Idioma:** C# con comentarios de código únicamente en español.
-*   **Identidad de commits:** Usar obligatoriamente `[SCRUM-X]` en los mensajes de Git.
-*   **CORS:** No eliminar la configuración permisiva de puertos Metro o emuladores móviles de Android (`10.0.2.2`).
-*   **Nomenclatura:** No utilices propiedades estándar como `Id` o `Name` en las entidades de base de datos; deben llevar el prefijo correspondiente del equipo.
+---
+
+## 🔍 8. VERIFICACIÓN FINAL DEL SPRINT 1 (COMPLETO)
+
+Con esta ampliación, el flujo extremo a extremo puede ser verificado de la siguiente manera:
+
+1.  **Ejecución de Servicios (Consola o Visual Studio):**
+    *   Ejecutar API Gateway (Puerto 5000)
+    *   Ejecutar Microservicio de Identidad (Puerto 5001)
+    *   Ejecutar Microservicio de Incidentes (Puerto 5003)
+2.  **Verificación de Login en Gateway Proxy:**
+    *   `POST http://localhost:5000/api/identity/login`
+    *   *Cuerpo:* `{"usuEmail": "admin@uta.edu.ec", "usuPassword": "admin123"}`
+    *   *Resultado:* Retorna `200 OK` con un JWT válido firmado con claims y datos estructurados usando el prefijo `usu`.
+3.  **Verificación de Alertas en Tiempo Real:**
+    *   Mismo flujo implementado en la Tarea B.
+
