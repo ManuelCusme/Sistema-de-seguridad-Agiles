@@ -1,7 +1,0 @@
-{
-  "dependencies": {
-    "@react-native-picker/picker": "^2.11.4",
-    "axios": "^1.16.0",
-    "expo-location": "^55.1.9"
-  }
-}
