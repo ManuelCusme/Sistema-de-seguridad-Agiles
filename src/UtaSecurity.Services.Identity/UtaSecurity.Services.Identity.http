@@ -1,0 +1,6 @@
+@UtaSecurity.Services.Identity_HostAddress = http://localhost:5096
+
+GET {{UtaSecurity.Services.Identity_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
