@@ -51,10 +51,10 @@ const HomeScreen = () => {
 
       let location = await Location.getCurrentPositionAsync({});
       
-      await axios.post(`${API_URL}/incident/panic`, {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        motivo: motivo
+      await axios.post(`${API_URL}/incidents`, {
+        incLatitude: location.coords.latitude,
+        incLongitude: location.coords.longitude,
+        incMotivo: motivo
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
