@@ -67,7 +67,7 @@ const GuardScreen = () => {
 
   useEffect(() => {
     const newConnection = new signalR.HubConnectionBuilder()
-      .withUrl("http://10.79.20.112:5000/alertHub")  //aca la ip de tu pc
+      .withUrl("http://10.79.20.112:5000/hubs/alerts")  //aca la ip de tu pc
       .withAutomaticReconnect()
       .build();
 
