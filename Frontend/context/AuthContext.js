@@ -12,7 +12,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
-      const response = await axios.post(`${API_URL}/auth/login`, { email, password });
+      const response = await axios.post(`${API_URL}/identity/login`, { usuEmail: email, usuPassword: password });
       setToken(response.data.token);
       setUser(response.data.user);
       return { success: true, user: response.data.user };
@@ -23,7 +23,7 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (data) => {
     try {
-      await axios.post(`${API_URL}/auth/register`, data);
+      await axios.post(`${API_URL}/identity/register`, data);
       return { success: true };
     } catch (error) {
       return { success: false, message: error.response?.data || 'Error en el registro' };
