@@ -71,15 +71,17 @@ const GuardScreen = () => {
       .withAutomaticReconnect()
       .build();
 
-    newConnection.on("ReceiveAlert", (userName, pos, zone, motivo, facultad) => {
+    newConnection.on("ReceiveAlert", (incidente) => {
+      // El backend envía un objeto IncidentDto con campos: incLatitud, incLongitud,
+      // incMotivo, incReportadoPor, incFacultad, incGeocercaNombre, incId, incFechaReporte
       const newAlert = {
-        id: Date.now().toString(),
-        user: userName,
-        pos,
-        zone: zone || "Ubicación desconocida",
-        motivo: motivo || "Emergencia",
-        facultad: facultad || "Estudiante",
-        time: new Date().toLocaleTimeString()
+        id:       incidente.incId || Date.now().toString(),
+        user:     incidente.incReportadoPor || 'Estudiante',
+        pos:      { lat: incidente.incLatitud, lng: incidente.incLongitud },
+        zone:     incidente.incGeocercaNombre || 'Ubicación desconocida',
+        motivo:   incidente.incMotivo || 'Emergencia',
+        facultad: incidente.incFacultad || 'FISEI',
+        time:     new Date().toLocaleTimeString()
       };
       
       setAlerts(prev => [newAlert, ...prev]);
@@ -87,9 +89,9 @@ const GuardScreen = () => {
 
       if (mapRef.current) {
         mapRef.current.animateToRegion({
-          latitude: pos.lat,
-          longitude: pos.lng,
-          latitudeDelta: 0.005,
+          latitude:      incidente.incLatitud,
+          longitude:     incidente.incLongitud,
+          latitudeDelta:  0.005,
           longitudeDelta: 0.005,
         }, 1000);
       }
