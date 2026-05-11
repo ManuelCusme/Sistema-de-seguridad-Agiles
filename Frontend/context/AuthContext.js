@@ -13,9 +13,18 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await axios.post(`${API_URL}/identity/login`, { usuEmail: email, usuPassword: password });
-      setToken(response.data.token);
-      setUser(response.data.user);
-      return { success: true, user: response.data.user };
+      setToken(response.data.usuToken);
+      // Mapear campos del backend (prefijo usu) a los usados por el Frontend
+      const user = {
+        Nombre1:   response.data.usuNombreCompleto?.split(' ')[0] || '',
+        Apellido1: response.data.usuNombreCompleto?.split(' ')[1] || '',
+        Facultad:  response.data.usuFacultad,
+        Rol:       response.data.usuRole,
+        rol:       response.data.usuRole, // alias minúscula para el chequeo de rol en LoginScreen
+        id:        response.data.usuId,
+      };
+      setUser(user);
+      return { success: true, user };
     } catch (error) {
       return { success: false, message: error.response?.data || 'Error en el login' };
     }
@@ -23,7 +32,17 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (data) => {
     try {
-      await axios.post(`${API_URL}/identity/register`, data);
+      // Mapear campos del formulario al formato del backend (prefijo usu)
+      await axios.post(`${API_URL}/identity/register`, {
+        usuNombre1:   data.nombre1,
+        usuNombre2:   data.nombre2,
+        usuApellido1: data.apellido1,
+        usuApellido2: data.apellido2,
+        usuEmail:     data.email,
+        usuPassword:  data.password,
+        usuBirthDate: data.birthDate,
+        usuFacultad:  data.facultad || 'FISEI',
+      });
       return { success: true };
     } catch (error) {
       return { success: false, message: error.response?.data || 'Error en el registro' };
