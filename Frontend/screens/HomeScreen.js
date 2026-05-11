@@ -54,7 +54,9 @@ const HomeScreen = () => {
       await axios.post(`${API_URL}/incidents`, {
         incLatitud:  location.coords.latitude,
         incLongitud: location.coords.longitude,
-        incMotivo:   motivo
+        incMotivo:   motivo,
+        incReportadoPor: `${user?.Nombre1} ${user?.Apellido1}`,
+        incFacultad: user?.Facultad || 'FISEI'
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });

@@ -28,8 +28,17 @@
       ]
     },
     {
+      "UpstreamPathTemplate": "/hubs/alerts/negotiate",
+      "UpstreamMethods": [ "Post", "Options" ],
+      "DownstreamPathTemplate": "/hubs/alerts/negotiate",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5003 }
+      ]
+    },
+    {
       "UpstreamPathTemplate": "/hubs/alerts",
-      "UpstreamMethods": [ "Get", "Post" ],
+      "UpstreamMethods": [ "Get" ],
       "DownstreamPathTemplate": "/hubs/alerts",
       "DownstreamScheme": "ws",
       "DownstreamHostAndPorts": [

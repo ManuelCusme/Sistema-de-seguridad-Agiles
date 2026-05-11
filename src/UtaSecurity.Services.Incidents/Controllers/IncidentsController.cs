@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using UtaSecurity.Services.Incidents.Hubs;
 using UtaSecurity.Services.Incidents.Models;
+using UtaSecurity.Services.Incidents.Data;
 
 namespace UtaSecurity.Services.Incidents.Controllers
 {
@@ -21,15 +22,13 @@ namespace UtaSecurity.Services.Incidents.Controllers
     [Route("api/[controller]")]
     public class IncidentsController : ControllerBase
     {
-        // Contexto del Hub SignalR — permite emitir eventos desde el controlador HTTP
         private readonly IHubContext<AlertHub> _hubContext;
+        private readonly ApplicationDbContext _context;
 
-        /// <summary>
-        /// Constructor con inyección de dependencias del Hub de alertas.
-        /// </summary>
-        public IncidentsController(IHubContext<AlertHub> hubContext)
+        public IncidentsController(IHubContext<AlertHub> hubContext, ApplicationDbContext context)
         {
             _hubContext = hubContext;
+            _context = context;
         }
 
         /// <summary>
@@ -56,8 +55,29 @@ namespace UtaSecurity.Services.Incidents.Controllers
             objNuevaAlerta.incFechaReporte = DateTime.UtcNow;
 
             // Transmitir la alerta a todos los guardias conectados por WebSocket
-            // El evento 'ReceiveAlert' es escuchado por GuardScreen.js y el mapa AdminWeb
             await _hubContext.Clients.All.SendAsync("ReceiveAlert", objNuevaAlerta);
+
+            // Guardar en Base de Datos
+            try
+            {
+                var entity = new IncidentEntity
+                {
+                    Id = Guid.Parse(objNuevaAlerta.incId),
+                    UserId = Guid.Empty, // En el Sprint 1 no estamos vinculando el ID real aún, se puede mejorar luego
+                    Latitude = objNuevaAlerta.incLatitud,
+                    Longitude = objNuevaAlerta.incLongitud,
+                    GeofenceName = objNuevaAlerta.incGeocercaNombre,
+                    Motivo = objNuevaAlerta.incMotivo,
+                    Timestamp = objNuevaAlerta.incFechaReporte
+                };
+                _context.Incidents.Add(entity);
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                // Log error but don't stop the real-time alert
+                Console.WriteLine($"Error al guardar incidente: {ex.Message}");
+            }
 
             // Retornar confirmación con los datos del incidente procesado
             return Ok(new

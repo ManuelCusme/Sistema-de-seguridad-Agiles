@@ -7,8 +7,8 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
 
-  // Use your local IP instead of localhost for mobile devices
-  const API_URL = 'http://10.79.20.112:5000/api';
+  // IMPORTANTE: Usa tu IP local (192.168.0.5) para que el celular encuentre el servidor
+  const API_URL = 'http://192.168.0.5:5000/api';
 
   const login = async (email, password) => {
     try {

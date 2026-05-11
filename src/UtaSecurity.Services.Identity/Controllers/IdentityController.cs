@@ -11,6 +11,8 @@ using System.Linq;
 using System.Security.Claims;
 using System.Text;
 using UtaSecurity.Services.Identity.Models;
+using UtaSecurity.Services.Identity.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace UtaSecurity.Services.Identity.Controllers
 {
@@ -22,16 +24,17 @@ namespace UtaSecurity.Services.Identity.Controllers
     [Route("api/[controller]")]
     public class IdentityController : ControllerBase
     {
-        // Almacenamiento en memoria volátil de forma estática (perfecto para desarrollo y demostración en el Sprint 1)
-        private static readonly List<UserEntity> _usuariosBD = new();
-        private const string SecretKey = "SuperSecretSecurityKeyForUtaSecuritySystem2026"; // Clave de firma para JWT en desarrollo
+        private readonly ApplicationDbContext _context;
+        private static bool _seeded = false;
+        private const string SecretKey = "SuperSecretSecurityKeyForUtaSecuritySystem2026"; 
 
-        public IdentityController()
+        public IdentityController(ApplicationDbContext context)
         {
-            // Cargar usuarios de prueba institucionales (DITIC Simulation) en el arranque
-            if (!_usuariosBD.Any())
+            _context = context;
+            if (!_seeded)
             {
                 SeedUsers();
+                _seeded = true;
             }
         }
 
@@ -53,7 +56,7 @@ namespace UtaSecurity.Services.Identity.Controllers
             }
 
             // Validar si el correo institucional ya se encuentra en uso
-            if (_usuariosBD.Any(u => u.usuEmail.Equals(dto.usuEmail, StringComparison.OrdinalIgnoreCase)))
+            if (_context.Users.Any(u => u.usuEmail == dto.usuEmail))
             {
                 return BadRequest(new { error = "El correo electrónico institucional ya se encuentra registrado." });
             }
@@ -68,7 +71,7 @@ namespace UtaSecurity.Services.Identity.Controllers
 
             var nuevoUsuario = new UserEntity
             {
-                usuId = Guid.NewGuid().ToString(),
+                usuId = Guid.NewGuid(),
                 usuNombre1 = dto.usuNombre1,
                 usuNombre2 = dto.usuNombre2,
                 usuApellido1 = dto.usuApellido1,
@@ -82,14 +85,15 @@ namespace UtaSecurity.Services.Identity.Controllers
                 usuCreatedAt = DateTime.UtcNow
             };
 
-            _usuariosBD.Add(nuevoUsuario);
+            _context.Users.Add(nuevoUsuario);
+            _context.SaveChanges();
 
             return Ok(new
             {
                 mensaje = "Usuario registrado exitosamente en el sistema de seguridad.",
                 usuario = new
                 {
-                    nuevoUsuario.usuId,
+                    usuId = nuevoUsuario.usuId.ToString(),
                     nuevoUsuario.usuEmail,
                     nuevoUsuario.usuNombre1,
                     nuevoUsuario.usuApellido1,
@@ -112,7 +116,7 @@ namespace UtaSecurity.Services.Identity.Controllers
             }
 
             // Buscar usuario
-            var usuario = _usuariosBD.FirstOrDefault(u => u.usuEmail.Equals(dto.usuEmail, StringComparison.OrdinalIgnoreCase));
+            var usuario = _context.Users.FirstOrDefault(u => u.usuEmail == dto.usuEmail);
             if (usuario == null || !BCrypt.Net.BCrypt.Verify(dto.usuPassword, usuario.usuPasswordHash))
             {
                 return Unauthorized(new { error = "Credenciales incorrectas. Verifique el correo o contraseña." });
@@ -132,7 +136,7 @@ namespace UtaSecurity.Services.Identity.Controllers
             {
                 Subject = new ClaimsIdentity(new[]
                 {
-                    new Claim(ClaimTypes.NameIdentifier, usuario.usuId),
+                    new Claim(ClaimTypes.NameIdentifier, usuario.usuId.ToString()),
                     new Claim(ClaimTypes.Email, usuario.usuEmail),
                     new Claim(ClaimTypes.Role, usuario.usuRole),
                     new Claim("NombreCompleto", nombreCompleto),
@@ -149,7 +153,7 @@ namespace UtaSecurity.Services.Identity.Controllers
             return Ok(new UserAuthResponseDto
             {
                 usuToken = tokenString,
-                usuId = usuario.usuId,
+                usuId = usuario.usuId.ToString(),
                 usuNombreCompleto = nombreCompleto,
                 usuEmail = usuario.usuEmail,
                 usuRole = usuario.usuRole,
@@ -163,9 +167,9 @@ namespace UtaSecurity.Services.Identity.Controllers
         [HttpGet("users")]
         public IActionResult GetUsers()
         {
-            var publicList = _usuariosBD.Select(u => new
+            var publicList = _context.Users.Select(u => new
             {
-                u.usuId,
+                usuId = u.usuId.ToString(),
                 u.usuNombre1,
                 u.usuApellido1,
                 u.usuEmail,
@@ -179,49 +183,61 @@ namespace UtaSecurity.Services.Identity.Controllers
         /// <summary>
         /// Sembrar los 11 usuarios institucionales indicados en GUIAPROYECTO.md
         /// </summary>
-        private static void SeedUsers()
+        private void SeedUsers()
         {
             // 1. Administrador Central
-            _usuariosBD.Add(new UserEntity
+            if (!_context.Users.Any(u => u.usuEmail == "admin@uta.edu.ec"))
             {
-                usuId = Guid.NewGuid().ToString(),
-                usuNombre1 = "Administrador",
-                usuApellido1 = "Central",
-                usuEmail = "admin@uta.edu.ec",
-                usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("admin123"),
-                usuRole = "Admin",
-                usuFacultad = "DITIC"
-            });
+                _context.Users.Add(new UserEntity
+                {
+                    usuId = Guid.NewGuid(),
+                    usuNombre1 = "Administrador",
+                    usuApellido1 = "Central",
+                    usuEmail = "admin@uta.edu.ec",
+                    usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("admin123"),
+                    usuRole = "Admin",
+                    usuFacultad = "DITIC"
+                });
+            }
 
             // 2. 5 Estudiantes (FISEI)
             for (int i = 1; i <= 5; i++)
             {
-                _usuariosBD.Add(new UserEntity
+                string email = $"estudiante{i}@uta.edu.ec";
+                if (!_context.Users.Any(u => u.usuEmail == email))
                 {
-                    usuId = Guid.NewGuid().ToString(),
-                    usuNombre1 = "Estudiante",
-                    usuApellido1 = i.ToString(),
-                    usuEmail = $"estudiante{i}@uta.edu.ec",
-                    usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("123456"),
-                    usuRole = "Estudiante",
-                    usuFacultad = "FISEI"
-                });
+                    _context.Users.Add(new UserEntity
+                    {
+                        usuId = Guid.NewGuid(),
+                        usuNombre1 = "Estudiante",
+                        usuApellido1 = i.ToString(),
+                        usuEmail = email,
+                        usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("123456"),
+                        usuRole = "Estudiante",
+                        usuFacultad = "FISEI"
+                    });
+                }
             }
 
             // 3. 5 Guardias (Seguridad)
             for (int i = 1; i <= 5; i++)
             {
-                _usuariosBD.Add(new UserEntity
+                string email = $"guardia{i}@uta.edu.ec";
+                if (!_context.Users.Any(u => u.usuEmail == email))
                 {
-                    usuId = Guid.NewGuid().ToString(),
-                    usuNombre1 = "Guardia",
-                    usuApellido1 = i.ToString(),
-                    usuEmail = $"guardia{i}@uta.edu.ec",
-                    usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("123456"),
-                    usuRole = "Guardia",
-                    usuFacultad = "Seguridad"
-                });
+                    _context.Users.Add(new UserEntity
+                    {
+                        usuId = Guid.NewGuid(),
+                        usuNombre1 = "Guardia",
+                        usuApellido1 = i.ToString(),
+                        usuEmail = email,
+                        usuPasswordHash = BCrypt.Net.BCrypt.HashPassword("123456"),
+                        usuRole = "Guardia",
+                        usuFacultad = "Seguridad"
+                    });
+                }
             }
+            _context.SaveChanges();
         }
     }
 }

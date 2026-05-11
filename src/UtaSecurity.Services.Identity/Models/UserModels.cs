@@ -12,8 +12,8 @@ namespace UtaSecurity.Services.Identity.Models
     /// </summary>
     public class UserEntity
     {
-        // usuId: Identificador único del usuario
-        public string usuId { get; set; } = Guid.NewGuid().ToString();
+        // usuId: Identificador único del usuario (UNIQUEIDENTIFIER en SQL)
+        public Guid usuId { get; set; } = Guid.NewGuid();
 
         // usuNombre1: Primer nombre del usuario (Requerido)
         public string usuNombre1 { get; set; } = string.Empty;

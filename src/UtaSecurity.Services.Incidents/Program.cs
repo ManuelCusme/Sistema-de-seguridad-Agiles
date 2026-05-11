@@ -5,11 +5,17 @@
 // Eso corresponde a MS-A (Identity) y será integrado en sprints futuros.
 
 using UtaSecurity.Services.Incidents.Hubs;
+using Microsoft.EntityFrameworkCore;
+using UtaSecurity.Services.Incidents.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // --- REGISTRAR CONTROLADORES ---
 builder.Services.AddControllers();
+
+// --- REGISTRAR CONTEXTO DE BASE DE DATOS ---
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // --- ACTIVAR SIGNALR PARA NOTIFICACIONES EN TIEMPO REAL ---
 builder.Services.AddSignalR();
