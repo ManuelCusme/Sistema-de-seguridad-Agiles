@@ -7,7 +7,6 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import './App.css';
 
-// Fix for default marker icon
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -15,7 +14,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Definición de Zonas (Cuadrantes UTA Huachi)
+// Zonas (Cuadrantes UTA Huachi)
 const zones = [
   { id: 'Z1', bounds: [[-1.2710, -78.6250], [-1.2690, -78.6235]], color: '#FF5252', label: 'ZONA 1 - INGENIERÍA' },
   { id: 'Z2', bounds: [[-1.2710, -78.6235], [-1.2690, -78.6210]], color: '#FFD740', label: 'ZONA 2 - ADMINISTRACIÓN' },
@@ -47,9 +46,13 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/auth/login', { email, password });
-      const userData = res.data.user;
-      const userRole = userData.Rol || userData.rol || userData.role || userData.Role;
+      const res = await axios.post('http://localhost:5000/api/identity/login', { 
+        usuEmail: email, 
+        usuPassword: password 
+      });
+      
+      const userData = res.data;
+      const userRole = userData.usuRole;
       
       if (userRole === 'Admin') {
         setIsLoggedIn(true);
@@ -58,7 +61,7 @@ function App() {
         setError('Acceso denegado. Solo administradores.');
       }
     } catch (err) {
-      setError('Credenciales incorrectas');
+      setError('Credenciales incorrectas o servidor fuera de línea');
     }
   };
 
@@ -66,23 +69,25 @@ function App() {
     if (!isLoggedIn) return;
 
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl("http://localhost:5000/alertHub")
+      .withUrl("http://localhost:5000/hubs/alerts")
       .withAutomaticReconnect()
       .build();
 
-    connection.on("ReceiveAlert", (user, pos, zone, motivo, facultad) => {
+    connection.on("ReceiveAlert", (incident) => {
       const newAlert = {
-        id: Date.now(),
-        user,
-        pos,
-        zone: zone || "Ubicación desconocida",
-        motivo: motivo || "Emergencia",
-        facultad: facultad || "FISEI",
+        id: incident.incId || Date.now(),
+        user: incident.incReportadoPor,
+        pos: { lat: incident.incLatitud, lng: incident.incLongitud },
+        zone: incident.incGeocercaNombre || "Ubicación desconocida",
+        motivo: incident.incMotivo || "Emergencia",
+        facultad: incident.incFacultad || "FISEI",
         time: new Date().toLocaleTimeString(),
-        isInside: zone && zone !== "Ubicación desconocida"
+        isInside: incident.incGeocercaNombre && incident.incGeocercaNombre !== "Ubicación desconocida"
       };
+      
       setAlerts(prev => [newAlert, ...prev]);
-      if (newAlert.isInside) setActiveCoords(pos);
+      if (newAlert.isInside) setActiveCoords(newAlert.pos);
+      
       if (audioRef.current) {
         audioRef.current.play().catch(() => {});
       }
