@@ -67,7 +67,7 @@ const GuardScreen = () => {
 
   useEffect(() => {
     const newConnection = new signalR.HubConnectionBuilder()
-      .withUrl("http://10.79.20.112:5000/hubs/alerts")
+      .withUrl("http://192.168.0.5:5000/hubs/alerts")
       .withAutomaticReconnect()
       .build();
 

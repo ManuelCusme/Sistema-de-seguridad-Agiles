@@ -15,11 +15,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("GlobalCorsPolicy", policy =>
     {
-        policy.WithOrigins(
-                "http://localhost:5173",    // Panel Web React (Vite)
-                "http://localhost:8081",    // React Native Metro Bundler
-                "http://10.0.2.2:8081"     // Emulador Android (IP especial del host)
-            )
+        policy.SetIsOriginAllowed(origin => true) // Permitir cualquier origen (necesario para IP dinámica)
             .AllowAnyMethod()
             .AllowAnyHeader()
             .AllowCredentials();            // Obligatorio para el handshake de WebSockets SignalR
@@ -41,6 +37,7 @@ app.UseCors("GlobalCorsPolicy");
 // IMPORTANTE: Debe registrarse con UseRouting + UseEndpoints ANTES de UseOcelot
 // Ocelot es un middleware terminal y capturaría la ruta /health si no se hace así
 app.UseRouting();
+app.UseWebSockets(); // Obligatorio para SignalR/WebSockets a través del Gateway
 
 app.UseEndpoints(endpoints =>
 {
