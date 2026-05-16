@@ -35,6 +35,9 @@ namespace UtaSecurity.Services.Incidents.Models
         // incSeveridad: Nivel de criticidad de la alerta (Bajo, Medio, Alto, Crítico)
         public string incSeveridad { get; set; } = "Medio";
 
+        // incZona: Zona detectada usando el GPS y el MS-C de Zonas
+        public string incZona { get; set; } = "No disponible";
+
         // incFechaReporte: Marca de tiempo UTC del servidor al procesar la alerta
         public DateTime incFechaReporte { get; set; } = DateTime.UtcNow;
     }
