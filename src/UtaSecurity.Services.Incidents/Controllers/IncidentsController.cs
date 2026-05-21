@@ -24,11 +24,15 @@ namespace UtaSecurity.Services.Incidents.Controllers
     {
         private readonly IHubContext<AlertHub> _hubContext;
         private readonly ApplicationDbContext _context;
+        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ILogger<IncidentsController> _logger;
 
-        public IncidentsController(IHubContext<AlertHub> hubContext, ApplicationDbContext context)
+        public IncidentsController(IHubContext<AlertHub> hubContext, ApplicationDbContext context, IHttpClientFactory httpClientFactory, ILogger<IncidentsController> logger)
         {
             _hubContext = hubContext;
             _context = context;
+            _httpClientFactory = httpClientFactory;
+            _logger = logger;
         }
 
         /// <summary>
@@ -40,19 +44,45 @@ namespace UtaSecurity.Services.Incidents.Controllers
         [HttpPost]
         public async Task<IActionResult> PostIncident([FromBody] IncidentDto objNuevaAlerta)
         {
-            // Validación mínima: coordenadas obligatorias para la geolocalización
-            if (objNuevaAlerta.incLatitud == 0 && objNuevaAlerta.incLongitud == 0)
-            {
-                return BadRequest(new
-                {
-                    error = "Las coordenadas son obligatorias.",
-                    campos = new[] { "incLatitud", "incLongitud" }
-                });
-            }
-
             // Asignar datos de control desde el servidor (no confiar en valores del cliente)
             objNuevaAlerta.incId = Guid.NewGuid().ToString();
             objNuevaAlerta.incFechaReporte = DateTime.UtcNow;
+
+            string zonaDetectada = "No disponible";
+
+            if (objNuevaAlerta.incLatitud == 0 && objNuevaAlerta.incLongitud == 0)
+            {
+                _logger.LogWarning("Alerta recibida sin coordenadas GPS. No se puede detectar zona.");
+            }
+            else
+            {
+                // Llamada al MS-C para detectar la zona (TA-06.4)
+                try
+                {
+                    var client = _httpClientFactory.CreateClient("ZoneService");
+                    var response = await client.GetAsync($"/zonas/detectar?lat={objNuevaAlerta.incLatitud}&lng={objNuevaAlerta.incLongitud}");
+                    
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var result = await response.Content.ReadAsStringAsync();
+                        if (!string.IsNullOrWhiteSpace(result))
+                        {
+                            // Limpiar comillas y espacios en caso de que la respuesta sea un string JSON ("Campus Huachi" -> Campus Huachi)
+                            zonaDetectada = result.Trim('"', ' ', '\n', '\r');
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"MS-C de Zonas devolvió error o no encontró zona: {response.StatusCode}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning($"Error al contactar MS-C de Zonas: {ex.Message}");
+                }
+            }
+
+            objNuevaAlerta.incZona = zonaDetectada;
 
             // Transmitir la alerta a todos los guardias conectados por WebSocket
             await _hubContext.Clients.All.SendAsync("ReceiveAlert", objNuevaAlerta);
@@ -68,6 +98,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
                     Longitude = objNuevaAlerta.incLongitud,
                     GeofenceName = objNuevaAlerta.incGeocercaNombre,
                     Motivo = objNuevaAlerta.incMotivo,
+                    Zona = zonaDetectada,
                     Timestamp = objNuevaAlerta.incFechaReporte
                 };
                 _context.Incidents.Add(entity);
@@ -76,7 +107,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
             catch (Exception ex)
             {
                 // Log error but don't stop the real-time alert
-                Console.WriteLine($"Error al guardar incidente: {ex.Message}");
+                _logger.LogError($"Error al guardar incidente: {ex.Message}");
             }
 
             // Retornar confirmación con los datos del incidente procesado
