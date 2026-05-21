@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import * as signalR from '@microsoft/signalr';
-import { AlertCircle, Radio, Clock, Lock, User, LogIn, MapPin, ShieldAlert } from 'lucide-react';
+import { AlertCircle, Radio, Clock, Lock, User, LogIn, MapPin, ShieldAlert, Filter } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Rectangle, Tooltip, Polygon } from 'react-leaflet';
 import axios from 'axios';
 import 'leaflet/dist/leaflet.css';
@@ -14,7 +14,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// Zonas Reales (Ajustadas a UTA Huachi según Database.sql)
+// Zonas Reales (Ajustadas a UTA Huachi según Planificación de Sprint 2)
 const zones = [
   {
     id: 'Z1',
@@ -25,7 +25,7 @@ const zones = [
       [-1.268564, -78.62584]   // LeftMid
     ],
     color: '#FF5252',
-    label: 'ZONA 1'
+    label: 'FACULTAD DE INGENIERÍA'
   },
   {
     id: 'Z2',
@@ -36,7 +36,7 @@ const zones = [
       [-1.268564, -78.624212]  // Centro
     ],
     color: '#FFD740',
-    label: 'ZONA 2'
+    label: 'BIBLIOTECA GENERAL'
   },
   {
     id: 'Z3',
@@ -47,7 +47,7 @@ const zones = [
       [-1.270376, -78.626380]   // SW (Verde)
     ],
     color: '#40C4FF',
-    label: 'ZONA 3'
+    label: 'RECTORADO / ADMINISTRACIÓN'
   },
   {
     id: 'Z4',
@@ -58,7 +58,7 @@ const zones = [
       [-1.27065, -78.624212]   // BottomMid
     ],
     color: '#69F0AE',
-    label: 'ZONA 4'
+    label: 'COMPLEJO DEPORTIVO'
   },
 ];
 
@@ -73,7 +73,12 @@ function RecenterMap({ coords }) {
 }
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  // =========================================================================
+  // ATENCIÓN MATEO: CAMBIO TEMPORAL DE DESARROLLO (Bypass de Login)
+  // Al terminar tu trabajo de filtros y cierre de casos, cambia 'true' por 'false'.
+  // =========================================================================
+  const [isLoggedIn, setIsLoggedIn] = useState(false); 
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -82,6 +87,8 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [activeCoords, setActiveCoords] = useState({ lat: -1.2687, lng: -78.6247 });
   const audioRef = useRef(null);
+  const [filterZone, setFilterZone] = useState('TODAS');
+  const [filterMotivo, setFilterMotivo] = useState('TODOS');
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -135,6 +142,10 @@ function App() {
       }
     });
 
+    connection.on("IncidentClosed", (incidentId) => {
+      setAlerts(prev => prev.filter(a => a.id !== incidentId));
+    });
+
     connection.start()
       .then(() => setConnected(true))
       .catch(() => setConnected(false));
@@ -169,6 +180,12 @@ function App() {
     setAlerts(prev => prev.filter(a => a.id !== id));
   };
 
+  const filteredAlerts = alerts.filter(alert => {
+    const matchesZone = filterZone === 'TODAS' || alert.zone.toUpperCase() === filterZone.toUpperCase();
+    const matchesMotivo = filterMotivo === 'TODOS' || alert.motivo.toUpperCase() === filterMotivo.toUpperCase();
+    return matchesZone && matchesMotivo;
+  });
+
   return (
     <div className="dashboard">
       <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" />
@@ -180,9 +197,69 @@ function App() {
           <button onClick={() => setIsLoggedIn(false)} className="logout-btn">Salir</button>
         </div>
 
+        <div className="filter-container" style={{ padding: '0 15px 15px 15px', borderBottom: '1px solid #333', marginBottom: '15px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#aaa', fontWeight: 'bold', marginBottom: '12px', letterSpacing: '0.5px' }}>
+            <Filter size={14} /> FILTROS TÁCTICOS
+          </div>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={{ fontSize: '0.7rem', color: '#777', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Zona:</label>
+              <select 
+                value={filterZone} 
+                onChange={(e) => setFilterZone(e.target.value)}
+                style={{ 
+                  width: '100%', 
+                  padding: '8px', 
+                  borderRadius: '4px', 
+                  border: '1px solid #444', 
+                  background: '#2a2a3e', 
+                  color: '#ffffff',
+                  fontSize: '0.85rem', 
+                  cursor: 'pointer',
+                  outline: 'none'
+                }}
+              >
+                <option value="TODAS">🌍 Todas las ubicaciones</option>
+                <option value="FACULTAD DE INGENIERÍA">🔴 Fac. Ingeniería</option>
+                <option value="BIBLIOTECA GENERAL">🟡 Biblioteca General</option>
+                <option value="RECTORADO / ADMINISTRACIÓN">🔵 Rectorado / Admin</option>
+                <option value="COMPLEJO DEPORTIVO">🟢 Complejo Deportivo</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '0.7rem', color: '#777', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Incidente:</label>
+              <select 
+                value={filterMotivo} 
+                onChange={(e) => setFilterMotivo(e.target.value)}
+                style={{ 
+                  width: '100%', 
+                  padding: '8px', 
+                  borderRadius: '4px', 
+                  border: '1px solid #444', 
+                  background: '#2a2a3e', 
+                  color: '#ffffff',
+                  fontSize: '0.85rem', 
+                  cursor: 'pointer',
+                  outline: 'none'
+                }}
+              >
+                <option value="TODOS">⚠️ Todos los tipos</option>
+                <option value="EMERGENCIA">Emergencia General</option>
+                <option value="ROBO">Robo / Hurto</option>
+                <option value="SOSPECHOSO">Actividad Sospechosa</option>
+                <option value="AGRESIÓN">Agresión / Pelea</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <div className="alert-list">
-          <h2 style={{ fontSize: '0.9rem', color: '#666', marginBottom: '15px' }}>SALA DE INCIDENTES</h2>
-          {alerts.map(alert => (
+          <h2 style={{ fontSize: '0.9rem', color: '#666', marginBottom: '15px' }}>SALA DE INCIDENTES ({filteredAlerts.length})</h2>
+          
+          {/* --- Ahora iteramos sobre filteredAlerts en vez de alerts --- */}
+          {filteredAlerts.map(alert => (
             <div key={alert.id} className="alert-card active-alert"
               onClick={() => alert.isInside && setActiveCoords(alert.pos)}>
               <div className="alert-header">
@@ -196,7 +273,7 @@ function App() {
               </div>
             </div>
           ))}
-          {alerts.length === 0 && <p style={{ textAlign: 'center', color: '#444', marginTop: 40 }}>Esperando reportes...</p>}
+          {filteredAlerts.length === 0 && <p style={{ textAlign: 'center', color: '#444', marginTop: 40 }}>No hay reportes que coincidan...</p>}
         </div>
       </aside>
 
@@ -210,18 +287,21 @@ function App() {
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <RecenterMap coords={activeCoords} />
 
-          {/* Dibujo de las 4 Zonas de la Pizarra */}
+          {/* Dibujo de las 4 Zonas de la Pizarra con Efecto Hover */}
           {zones.map(z => (
             <Polygon
               key={z.id}
               positions={z.positions}
-              pathOptions={{ color: z.color, weight: 2, fillOpacity: 0.1 }}
+              pathOptions={{ color: z.color, weight: 2, fillOpacity: 0.12 }}
             >
-              <Popup>{z.label}</Popup>
+              <Tooltip sticky direction="top" opacity={0.9}>
+                <span style={{ fontWeight: 'bold', color: '#333' }}>{z.label}</span>
+              </Tooltip>
             </Polygon>
           ))}
 
-          {alerts.filter(a => a.isInside).map(alert => (
+          {/* --- Los marcadores del mapa también respetan los filtros dinámicos --- */}
+          {filteredAlerts.filter(a => a.isInside).map(alert => (
             <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]}>
               <Popup>
                 <div style={{ textAlign: 'center' }}>
