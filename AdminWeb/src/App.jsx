@@ -8,6 +8,12 @@ import 'leaflet/dist/leaflet.css';
 import './App.css';
 import LoginScreen from './LoginScreen';
 
+const AUTH_STORAGE_KEY = 'uta_auth';
+const AUTH_TTL_MS = 24 * 60 * 60 * 1000;
+const ADMIN_USER = 'admin@uta.edu.ec';
+const ADMIN_PASS = 'admin123';
+const API_BASE_URL = `http://${window.location.hostname}:5000`;
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -436,7 +442,7 @@ function IncidentIcon({ motive }) {
   );
 }
 
-function App({ onLogout }) {
+function App({ onLogout, session }) {
   const [view, setView] = useState('mapa');
   const [alerts, setAlerts] = useState(seedIncidents);
   const [mapResetKey, setMapResetKey] = useState(0);
@@ -682,6 +688,15 @@ function App({ onLogout }) {
           </div>
 
           <div className="topbar__actions">
+            {onLogout && (
+              <div className="user-chip" title={`${session?.role || 'Sin rol'} · ${session?.email || ''}`}>
+                <span className="user-chip__avatar">{(session?.displayName || 'A').charAt(0).toUpperCase()}</span>
+                <div>
+                  <strong>{session?.displayName || 'Usuario'}</strong>
+                  <span>{session?.role || 'Admin'}</span>
+                </div>
+              </div>
+            )}
             <label className="searchbox">
               <Search size={16} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar..." />
@@ -690,11 +705,7 @@ function App({ onLogout }) {
               <Bell size={16} />
               Alertas
             </button>
-            {onLogout && (
-              <button className="ghost-btn" type="button" onClick={onLogout} title="Cerrar sesión">
-                Cerrar sesión
-              </button>
-            )}
+            {onLogout && <button className="ghost-btn" type="button" onClick={onLogout} title="Cerrar sesión">Cerrar sesión</button>}
           </div>
         </header>
 
@@ -958,78 +969,125 @@ function App({ onLogout }) {
 }
 
 function AppWrapper() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [session, setSession] = useState(null);
   const [authError, setAuthError] = useState('');
 
-  const STORAGE_KEY = 'uta_auth';
-  const ADMIN_USER = 'admin@uta.edu.ec';
-  const ADMIN_PASS = 'admin123';
-
-  const determineRole = (user) => {
-    if (!user) return 'Unknown';
-    const u = String(user).toLowerCase();
-    if (u === ADMIN_USER) return 'Admin';
-    if (u.startsWith('guardia')) return 'Guardia';
-    if (u.startsWith('estudiante')) return 'Estudiante';
+  const determineRole = (userRole, userEmail = '') => {
+    const email = String(userEmail).toLowerCase();
+    const role = String(userRole || '').trim();
+    if (role) return role;
+    if (email === ADMIN_USER) return 'Admin';
+    if (email.startsWith('guardia')) return 'Guardia';
+    if (email.startsWith('estudiante')) return 'Estudiante';
     return 'User';
+  };
+
+  const clearSession = () => {
+    try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch (e) {
+      // ignore storage errors
+    }
+    setSession(null);
   };
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(AUTH_STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
-      if (parsed && parsed.user && parsed.role === 'Admin') {
-        setIsAuthenticated(true);
+      if (!parsed?.expiresAt || Date.now() > parsed.expiresAt) {
+        clearSession();
+        return;
+      }
+
+      if (parsed?.role === 'Admin') {
+        setSession(parsed);
+      } else {
+        clearSession();
       }
     } catch (e) {
       // ignore parse errors
     }
   }, []);
 
-  const handleLogin = ({ user, pass } = {}) => {
+  useEffect(() => {
+    if (!session?.expiresAt) return undefined;
+
+    const remainingMs = session.expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      clearSession();
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      clearSession();
+    }, remainingMs);
+
+    return () => clearTimeout(timer);
+  }, [session]);
+
+  const handleLogin = async ({ user, pass } = {}) => {
     setAuthError('');
     if (!user || !pass) {
       setAuthError('Credenciales incompletas');
       return;
     }
 
-    const role = determineRole(user);
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/identity/login`, {
+        usuEmail: user,
+        usuPassword: pass,
+      });
 
-    // static admin validation
-    if (role === 'Admin' && String(user).toLowerCase() === ADMIN_USER && pass === ADMIN_PASS) {
+      const data = response?.data || {};
+      const role = determineRole(data.usuRole, data.usuEmail);
+
+      if (role !== 'Admin') {
+        setAuthError('Acceso denegado: se requiere cuenta con rol Admin');
+        return;
+      }
+
+      const nextSession = {
+        token: data.usuToken || '',
+        email: data.usuEmail || user,
+        displayName: data.usuNombreCompleto || user,
+        role,
+        faculty: data.usuFacultad || '',
+        expiresAt: Date.now() + AUTH_TTL_MS,
+      };
+
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ user: ADMIN_USER, role }));
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextSession));
       } catch (e) {
         // ignore storage errors
       }
-      setIsAuthenticated(true);
-      setAuthError('');
-      return;
-    }
 
-    // Deny non-admin roles from accessing the admin panel
-    setAuthError('Acceso denegado: se requiere cuenta con rol Admin');
+      setSession(nextSession);
+      setAuthError('');
+    } catch (error) {
+      const message = error?.response?.data?.error || 'No se pudo autenticar con el backend';
+      setAuthError(message);
+    }
   };
 
   const handleLogout = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (e) {
-      // ignore
-    }
-    setIsAuthenticated(false);
+    clearSession();
   };
 
-  if (!isAuthenticated) {
+  if (!session) {
     return (
-      <LoginScreen onLogin={handleLogin} demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }} error={authError} />
+      <LoginScreen
+        onLogin={handleLogin}
+        demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }}
+        error={authError}
+      />
     );
   }
 
   return (
     <ErrorBoundary>
-      <App onLogout={handleLogout} />
+      <App onLogout={handleLogout} session={session} />
     </ErrorBoundary>
   );
 }

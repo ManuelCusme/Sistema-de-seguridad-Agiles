@@ -182,6 +182,43 @@ button {
   justify-content: flex-end;
 }
 
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 24px rgba(25, 35, 50, 0.05);
+}
+
+.user-chip__avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #0e2d4a, #4d82ff);
+  color: #fff;
+  font-weight: 700;
+}
+
+.user-chip strong,
+.user-chip span {
+  display: block;
+  line-height: 1.1;
+}
+
+.user-chip strong {
+  font-size: 0.92rem;
+}
+
+.user-chip span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .searchbox {
   display: inline-flex;
   align-items: center;
@@ -213,6 +250,13 @@ button {
   border: 1px solid var(--border);
   box-shadow: 0 10px 24px rgba(25, 35, 50, 0.05);
   cursor: pointer;
+}
+
+.ghost-btn:disabled,
+.primary-btn:disabled,
+.office-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .ghost-btn:active {
@@ -520,6 +564,7 @@ button {
 .login-form label { display:block; text-align:left; margin-bottom:8px; font-size:13px; }
 .login-form input { width:100%; padding:8px 10px; border-radius:8px; border:1px solid #e5e7eb; margin-top:6px; }
 .primary-btn { background:#2563eb; color:#fff; border:none; padding:8px 12px; border-radius:8px; }
+.primary-btn { cursor: pointer; }
 .login-note { display:block; margin-top:12px; color:#6b7280; font-size:12px; }
 .login-error { margin-top:10px; color:#b91c1c; background:#fee2e2; padding:8px 10px; border-radius:8px; font-size:13px; }
 

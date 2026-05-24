@@ -3,9 +3,17 @@ import React, { useState } from 'react';
 export default function LoginScreen({ onLogin, demoCreds, error }) {
   const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const submit = (payload) => {
-    if (onLogin) onLogin(payload);
+  const submit = async (payload) => {
+    if (!onLogin) return;
+
+    setLoading(true);
+    try {
+      await onLogin(payload);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -19,6 +27,7 @@ export default function LoginScreen({ onLogin, demoCreds, error }) {
             type="button"
             className="office-btn"
             onClick={() => submit(demoCreds || { user: 'admin@uta.edu.ec', pass: 'admin123' })}
+            disabled={loading}
           >
             <span className="office-btn__logo" aria-hidden>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -50,8 +59,8 @@ export default function LoginScreen({ onLogin, demoCreds, error }) {
             <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="●●●●●●" />
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="submit" className="primary-btn">Iniciar sesión</button>
-            <button type="button" className="ghost-btn" onClick={() => { setUser(''); setPass(''); }}>Limpiar</button>
+            <button type="submit" className="primary-btn" disabled={loading}>{loading ? 'Validando...' : 'Iniciar sesión'}</button>
+            <button type="button" className="ghost-btn" onClick={() => { setUser(''); setPass(''); }} disabled={loading}>Limpiar</button>
           </div>
         </form>
 
