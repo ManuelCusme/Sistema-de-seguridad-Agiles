@@ -961,8 +961,31 @@ function AppWrapper() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authError, setAuthError] = useState('');
 
+  const STORAGE_KEY = 'uta_auth';
   const ADMIN_USER = 'admin@uta.edu.ec';
   const ADMIN_PASS = 'admin123';
+
+  const determineRole = (user) => {
+    if (!user) return 'Unknown';
+    const u = String(user).toLowerCase();
+    if (u === ADMIN_USER) return 'Admin';
+    if (u.startsWith('guardia')) return 'Guardia';
+    if (u.startsWith('estudiante')) return 'Estudiante';
+    return 'User';
+  };
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.user && parsed.role === 'Admin') {
+        setIsAuthenticated(true);
+      }
+    } catch (e) {
+      // ignore parse errors
+    }
+  }, []);
 
   const handleLogin = ({ user, pass } = {}) => {
     setAuthError('');
@@ -971,22 +994,42 @@ function AppWrapper() {
       return;
     }
 
-    if (String(user).toLowerCase() === ADMIN_USER && pass === ADMIN_PASS) {
+    const role = determineRole(user);
+
+    // static admin validation
+    if (role === 'Admin' && String(user).toLowerCase() === ADMIN_USER && pass === ADMIN_PASS) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ user: ADMIN_USER, role }));
+      } catch (e) {
+        // ignore storage errors
+      }
       setIsAuthenticated(true);
       setAuthError('');
       return;
     }
 
-    setAuthError('Usuario o contraseña incorrectos');
+    // Deny non-admin roles from accessing the admin panel
+    setAuthError('Acceso denegado: se requiere cuenta con rol Admin');
+  };
+
+  const handleLogout = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      // ignore
+    }
+    setIsAuthenticated(false);
   };
 
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={handleLogin} demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }} error={authError} />;
+    return (
+      <LoginScreen onLogin={handleLogin} demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }} error={authError} />
+    );
   }
 
   return (
     <ErrorBoundary>
-      <App onLogout={() => setIsAuthenticated(false)} />
+      <App onLogout={handleLogout} />
     </ErrorBoundary>
   );
 }
