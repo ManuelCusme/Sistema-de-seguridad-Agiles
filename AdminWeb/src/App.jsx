@@ -438,7 +438,6 @@ function IncidentIcon({ motive }) {
 
 function App() {
   const [view, setView] = useState('mapa');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [alerts, setAlerts] = useState(seedIncidents);
   const [mapResetKey, setMapResetKey] = useState(0);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
@@ -954,6 +953,7 @@ function App() {
 }
 
 function AppWrapper() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   if (!isAuthenticated) {
     return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
   }
