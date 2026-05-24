@@ -6,7 +6,7 @@ import { BarChart3, Bell, CircleAlert, Filter, Flame, HandCoins, HeartPulse, Map
 import axios from 'axios';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
-import LoginCard from './LoginCard';
+import LoginScreen from './LoginScreen';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -438,6 +438,7 @@ function IncidentIcon({ motive }) {
 
 function App() {
   const [view, setView] = useState('mapa');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [alerts, setAlerts] = useState(seedIncidents);
   const [mapResetKey, setMapResetKey] = useState(0);
   const [loadingIncidents, setLoadingIncidents] = useState(true);
@@ -660,7 +661,6 @@ function App() {
           </div>
         </div>
 
-        <LoginCard />
 
         <Tabs active={view} onChange={setView} />
 
@@ -954,6 +954,10 @@ function App() {
 }
 
 function AppWrapper() {
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
+  }
+
   return (
     <ErrorBoundary>
       <App />
