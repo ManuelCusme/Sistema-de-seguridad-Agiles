@@ -136,6 +136,35 @@ namespace UtaSecurity.Services.Incidents.Controllers
             });
         }
 
+        [HttpGet]
+        public async Task<IActionResult> GetIncidents()
+        {
+            var incidents = await _context.Incidents
+                .OrderByDescending(item => item.Timestamp)
+                .Select(item => new
+                {
+                    incId = item.Id.ToString(),
+                    incMotivo = item.Motivo,
+                    incZona = item.Zona,
+                    incGeocercaNombre = item.GeofenceName,
+                    incReportadoPor = "Usuario institucional",
+                    incFacultad = "UTA",
+                    incSeveridad = item.Status,
+                    incEstado = item.Status,
+                    incLatitud = item.Latitude,
+                    incLongitud = item.Longitude,
+                    incFechaReporte = item.Timestamp,
+                    incAsignadoPor = item.AssignedByUserId,
+                    incAsignadoEn = item.AssignedAt,
+                    incCerradoPor = item.ClosedByUserId,
+                    incCerradoEn = item.ClosedAt,
+                    incObservacion = item.CloseObservation
+                })
+                .ToListAsync();
+
+            return Ok(incidents);
+        }
+
         [HttpPost("accept")]
         public async Task<IActionResult> AcceptIncident([FromBody] IncidentActionDto request)
         {
