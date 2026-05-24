@@ -11,5 +11,11 @@ namespace UtaSecurity.Services.Incidents.Models
         public string? GeofenceName { get; set; }
         public string Motivo { get; set; } = "Emergencia";
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+        public string Status { get; set; } = "PENDIENTE";
+        public Guid? AssignedByUserId { get; set; }
+        public DateTime? AssignedAt { get; set; }
+        public Guid? ClosedByUserId { get; set; }
+        public DateTime? ClosedAt { get; set; }
+        public string? CloseObservation { get; set; }
     }
 }

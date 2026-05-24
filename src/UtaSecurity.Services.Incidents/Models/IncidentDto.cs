@@ -29,6 +29,9 @@ namespace UtaSecurity.Services.Incidents.Models
         // incReportadoPor: Nombre completo del estudiante o guardia que emite la alerta
         public string incReportadoPor { get; set; } = string.Empty;
 
+        // incUsuarioId: Identificador del usuario autenticado que reporta la emergencia
+        public string incUsuarioId { get; set; } = string.Empty;
+
         // incFacultad: Facultad del reportante (ej: FISEI, FCHE, FCIAL)
         public string incFacultad { get; set; } = "FISEI";
 

@@ -39,6 +39,42 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    await dbContext.Database.ExecuteSqlRawAsync(@"
+        IF COL_LENGTH('dbo.Incidents', 'Status') IS NULL
+        BEGIN
+            ALTER TABLE Incidents ADD Status NVARCHAR(20) NOT NULL CONSTRAINT DF_Incidents_Status DEFAULT 'PENDIENTE';
+        END;
+
+        IF COL_LENGTH('dbo.Incidents', 'AssignedByUserId') IS NULL
+        BEGIN
+            ALTER TABLE Incidents ADD AssignedByUserId UNIQUEIDENTIFIER NULL;
+        END;
+
+        IF COL_LENGTH('dbo.Incidents', 'AssignedAt') IS NULL
+        BEGIN
+            ALTER TABLE Incidents ADD AssignedAt DATETIME NULL;
+        END;
+
+        IF COL_LENGTH('dbo.Incidents', 'ClosedByUserId') IS NULL
+        BEGIN
+            ALTER TABLE Incidents ADD ClosedByUserId UNIQUEIDENTIFIER NULL;
+        END;
+
+        IF COL_LENGTH('dbo.Incidents', 'ClosedAt') IS NULL
+        BEGIN
+            ALTER TABLE Incidents ADD ClosedAt DATETIME NULL;
+        END;
+
+        IF COL_LENGTH('dbo.Incidents', 'CloseObservation') IS NULL
+        BEGIN
+            ALTER TABLE Incidents ADD CloseObservation NVARCHAR(500) NULL;
+        END;
+    ");
+}
+
 // --- APLICAR MIDDLEWARES EN ORDEN CORRECTO ---
 app.UseCors("ServiceCorsPolicy");       // CORS debe ir antes de UseRouting
 app.UseRouting();

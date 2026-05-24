@@ -56,6 +56,7 @@ const HomeScreen = () => {
         incLongitud: location.coords.longitude,
         incMotivo:   motivo,
         incReportadoPor: `${user?.Nombre1} ${user?.Apellido1}`,
+        incUsuarioId: user?.id || user?.Id || '',
         incFacultad: user?.Facultad || 'FISEI'
       }, {
         headers: { Authorization: `Bearer ${token}` }
