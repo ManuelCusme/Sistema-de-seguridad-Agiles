@@ -455,6 +455,20 @@ button {
   line-height: 1;
 }
 
+.incident-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.incident-icon__glyph {
+  font-size: 16px;
+  line-height: 1;
+}
+
 .map-shell {
   flex: 1;
   min-height: 540px;

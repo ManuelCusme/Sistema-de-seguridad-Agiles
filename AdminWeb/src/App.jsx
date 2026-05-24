@@ -425,11 +425,12 @@ function TimelineBars({ values, variant }) {
 
 function IncidentIcon({ motive }) {
   const normalized = String(motive || 'EMERGENCIA').toUpperCase();
-  const Icon = motiveIcons[normalized] || CircleAlert;
+  const glyph = motiveGlyphs[normalized] || '📍';
+  const color = motiveColors[normalized] || '#4d82ff';
 
   return (
-    <span className="incident-icon" style={{ background: `${motiveColors[normalized] || '#4d82ff'}22`, color: motiveColors[normalized] || '#4d82ff' }}>
-      <Icon size={15} />
+    <span className="incident-icon" style={{ background: `${color}22`, color }}>
+      <span className="incident-icon__glyph">{glyph}</span>
     </span>
   );
 }
