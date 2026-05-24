@@ -521,6 +521,7 @@ button {
 .login-form input { width:100%; padding:8px 10px; border-radius:8px; border:1px solid #e5e7eb; margin-top:6px; }
 .primary-btn { background:#2563eb; color:#fff; border:none; padding:8px 12px; border-radius:8px; }
 .login-note { display:block; margin-top:12px; color:#6b7280; font-size:12px; }
+.login-error { margin-top:10px; color:#b91c1c; background:#fee2e2; padding:8px 10px; border-radius:8px; font-size:13px; }
 
 .map-shell {
   flex: 1;

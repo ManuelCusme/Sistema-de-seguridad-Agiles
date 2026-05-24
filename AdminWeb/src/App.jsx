@@ -436,7 +436,7 @@ function IncidentIcon({ motive }) {
   );
 }
 
-function App() {
+function App({ onLogout }) {
   const [view, setView] = useState('mapa');
   const [alerts, setAlerts] = useState(seedIncidents);
   const [mapResetKey, setMapResetKey] = useState(0);
@@ -690,6 +690,11 @@ function App() {
               <Bell size={16} />
               Alertas
             </button>
+            {onLogout && (
+              <button className="ghost-btn" type="button" onClick={onLogout} title="Cerrar sesión">
+                Cerrar sesión
+              </button>
+            )}
           </div>
         </header>
 
@@ -954,13 +959,34 @@ function App() {
 
 function AppWrapper() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  const ADMIN_USER = 'admin@uta.edu.ec';
+  const ADMIN_PASS = 'admin123';
+
+  const handleLogin = ({ user, pass } = {}) => {
+    setAuthError('');
+    if (!user || !pass) {
+      setAuthError('Credenciales incompletas');
+      return;
+    }
+
+    if (String(user).toLowerCase() === ADMIN_USER && pass === ADMIN_PASS) {
+      setIsAuthenticated(true);
+      setAuthError('');
+      return;
+    }
+
+    setAuthError('Usuario o contraseña incorrectos');
+  };
+
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
+    return <LoginScreen onLogin={handleLogin} demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }} error={authError} />;
   }
 
   return (
     <ErrorBoundary>
-      <App />
+      <App onLogout={() => setIsAuthenticated(false)} />
     </ErrorBoundary>
   );
 }
