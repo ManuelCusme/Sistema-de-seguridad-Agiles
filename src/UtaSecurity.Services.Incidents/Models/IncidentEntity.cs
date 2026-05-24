@@ -9,6 +9,8 @@ namespace UtaSecurity.Services.Incidents.Models
         public double Latitude { get; set; }
         public double Longitude { get; set; }
         public string? GeofenceName { get; set; }
+        // Zona detectada automáticamente desde MS-C de Zonas (Sprint 2 - TA-06.4)
+        public string Zona { get; set; } = "No disponible";
         public string Motivo { get; set; } = "Emergencia";
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
         public string Status { get; set; } = "PENDIENTE";

@@ -20,6 +20,17 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 // --- ACTIVAR SIGNALR PARA NOTIFICACIONES EN TIEMPO REAL ---
 builder.Services.AddSignalR();
 
+// --- REGISTRAR CLIENTE HTTP PARA MS-C DE ZONAS (TA-06.4) ---
+// El cliente "ZoneService" consume GET /zonas/detectar?lat=&lng= del microservicio de Manuel
+// La URL base es configurable por entorno para no hardcodear IPs
+builder.Services.AddHttpClient("ZoneService", client =>
+{
+    var baseUrl = builder.Configuration["ZoneServiceBaseUrl"] ?? "http://localhost:5004";
+    client.BaseAddress = new Uri(baseUrl);
+    // Timeout estricto: el flujo de alerta NO puede bloquearse más de 400ms esperando la zona
+    client.Timeout = TimeSpan.FromMilliseconds(400);
+});
+
 // --- POLÍTICA DE CORS PARA EL MICROSERVICIO ---
 // Acepta peticiones directas en desarrollo desde el Gateway, React y Metro Bundler
 builder.Services.AddCors(options =>
