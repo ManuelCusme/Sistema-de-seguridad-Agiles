@@ -4,6 +4,7 @@ import { MapContainer, Marker, Polygon, Popup, TileLayer, Tooltip, useMap } from
 import L from 'leaflet';
 import { BarChart3, Bell, CircleAlert, Filter, Flame, HandCoins, HeartPulse, MapPin, Search, ShieldAlert, SlidersHorizontal, TriangleAlert } from 'lucide-react';
 import axios from 'axios';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
 import LoginScreen from './LoginScreen';
@@ -1066,7 +1067,12 @@ function AppWrapper() {
       setSession(nextSession);
       setAuthError('');
     } catch (error) {
-      const message = error?.response?.data?.error || 'No se pudo autenticar con el backend';
+      const statusCode = error?.response?.status;
+      const message =
+        error?.response?.data?.error ||
+        (statusCode
+          ? `El servidor de autenticación respondió con estado ${statusCode}.`
+          : 'No se pudo conectar con el servicio de autenticación. Revisa que estén activos el Gateway y el microservicio de identidad.');
       setAuthError(message);
     }
   };
@@ -1075,20 +1081,38 @@ function AppWrapper() {
     clearSession();
   };
 
-  if (!session) {
-    return (
-      <LoginScreen
-        onLogin={handleLogin}
-        demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }}
-        error={authError}
-      />
-    );
-  }
-
   return (
-    <ErrorBoundary>
-      <App onLogout={handleLogout} session={session} />
-    </ErrorBoundary>
+    <BrowserRouter>
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            session ? (
+              <Navigate to="/panel" replace />
+            ) : (
+              <LoginScreen
+                onLogin={handleLogin}
+                demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }}
+                error={authError}
+              />
+            )
+          }
+        />
+        <Route
+          path="/panel"
+          element={
+            session ? (
+              <ErrorBoundary>
+                <App onLogout={handleLogout} session={session} />
+              </ErrorBoundary>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        <Route path="*" element={<Navigate to={session ? '/panel' : '/login'} replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 

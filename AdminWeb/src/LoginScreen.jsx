@@ -66,7 +66,7 @@ export default function LoginScreen({ onLogin, demoCreds, error }) {
 
         {error && <div className="login-error" role="status">{error}</div>}
 
-        <small className="login-note">Este inicio de sesión es estático para demostración; use credenciales institucionales.</small>
+        <small className="login-note">Para iniciar sesión necesitas tener levantado el Gateway y el microservicio de identidad. Usa admin@uta.edu.ec / admin123 para el panel administrativo.</small>
       </div>
     </div>
   );
