@@ -6,6 +6,7 @@ import { BarChart3, Bell, CircleAlert, Filter, Flame, HandCoins, HeartPulse, Map
 import axios from 'axios';
 import 'leaflet/dist/leaflet.css';
 import './App.css';
+import LoginCard from './LoginCard';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -658,6 +659,8 @@ function App() {
             <p>Panel administrativo</p>
           </div>
         </div>
+
+        <LoginCard />
 
         <Tabs active={view} onChange={setView} />
 
