@@ -8,6 +8,7 @@
 
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using UtaSecurity.Services.Incidents.Hubs;
 using UtaSecurity.Services.Incidents.Models;
 using UtaSecurity.Services.Incidents.Data;
@@ -44,6 +45,21 @@ namespace UtaSecurity.Services.Incidents.Controllers
         [HttpPost]
         public async Task<IActionResult> PostIncident([FromBody] IncidentDto objNuevaAlerta)
         {
+            if (objNuevaAlerta == null)
+            {
+                return BadRequest(new
+                {
+                    error = "El cuerpo del incidente es requerido."
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(objNuevaAlerta.incUsuarioId) || !Guid.TryParse(objNuevaAlerta.incUsuarioId, out var usuId))
+            {
+                return BadRequest(new
+                {
+                    error = "Se requiere un incUsuarioId válido para guardar el incidente en la base de datos."
+                });
+            }
             // Asignar datos de control desde el servidor (no confiar en valores del cliente)
             objNuevaAlerta.incId = Guid.NewGuid().ToString();
             objNuevaAlerta.incFechaReporte = DateTime.UtcNow;
@@ -93,13 +109,14 @@ namespace UtaSecurity.Services.Incidents.Controllers
                 var entity = new IncidentEntity
                 {
                     Id = Guid.Parse(objNuevaAlerta.incId),
-                    UserId = Guid.Empty, // En el Sprint 1 no estamos vinculando el ID real aún, se puede mejorar luego
+                    UserId = usuId,
                     Latitude = objNuevaAlerta.incLatitud,
                     Longitude = objNuevaAlerta.incLongitud,
                     GeofenceName = objNuevaAlerta.incGeocercaNombre,
                     Motivo = objNuevaAlerta.incMotivo,
+                    Timestamp = objNuevaAlerta.incFechaReporte,
                     Zona = zonaDetectada,
-                    Timestamp = objNuevaAlerta.incFechaReporte
+                    Status = "PENDIENTE"
                 };
                 _context.Incidents.Add(entity);
                 await _context.SaveChangesAsync();
@@ -113,8 +130,89 @@ namespace UtaSecurity.Services.Incidents.Controllers
             // Retornar confirmación con los datos del incidente procesado
             return Ok(new
             {
+                success = true,
                 mensaje = "Alerta de incidente registrada y transmitida exitosamente.",
                 data = objNuevaAlerta
+            });
+        }
+
+        [HttpPost("accept")]
+        public async Task<IActionResult> AcceptIncident([FromBody] IncidentActionDto request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.incId) || !Guid.TryParse(request.incId, out var incidentId))
+            {
+                return BadRequest(new { success = false, error = "El identificador del incidente es requerido." });
+            }
+
+            var incident = await _context.Incidents.FirstOrDefaultAsync(item => item.Id == incidentId);
+            if (incident == null)
+            {
+                return NotFound(new { success = false, error = "No se encontró el incidente solicitado." });
+            }
+
+            if (string.Equals(incident.Status, "CERRADO", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { success = false, error = "El incidente ya fue cerrado." });
+            }
+
+            incident.Status = "ASIGNADO";
+            incident.AssignedAt = DateTime.UtcNow;
+            incident.AssignedByUserId = Guid.TryParse(request.usuId, out var assignedByUserId) ? assignedByUserId : null;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                mensaje = "Incidente aceptado correctamente.",
+                data = new
+                {
+                    incId = incident.Id.ToString(),
+                    estado = incident.Status,
+                    asignadoEn = incident.AssignedAt,
+                    asignadoPor = incident.AssignedByUserId?.ToString()
+                }
+            });
+        }
+
+        [HttpPost("close")]
+        public async Task<IActionResult> CloseIncident([FromBody] IncidentActionDto request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.incId) || !Guid.TryParse(request.incId, out var incidentId))
+            {
+                return BadRequest(new { success = false, error = "El identificador del incidente es requerido." });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.incObservacion) || request.incObservacion.Trim().Length < 20)
+            {
+                return BadRequest(new { success = false, error = "La observación de cierre debe tener al menos 20 caracteres." });
+            }
+
+            var incident = await _context.Incidents.FirstOrDefaultAsync(item => item.Id == incidentId);
+            if (incident == null)
+            {
+                return NotFound(new { success = false, error = "No se encontró el incidente solicitado." });
+            }
+
+            incident.Status = "CERRADO";
+            incident.ClosedAt = DateTime.UtcNow;
+            incident.ClosedByUserId = Guid.TryParse(request.usuId, out var closedByUserId) ? closedByUserId : null;
+            incident.CloseObservation = request.incObservacion.Trim();
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                mensaje = "Incidente cerrado correctamente.",
+                data = new
+                {
+                    incId = incident.Id.ToString(),
+                    estado = incident.Status,
+                    cerradoEn = incident.ClosedAt,
+                    cerradoPor = incident.ClosedByUserId?.ToString(),
+                    incObservacion = incident.CloseObservation
+                }
             });
         }
     }

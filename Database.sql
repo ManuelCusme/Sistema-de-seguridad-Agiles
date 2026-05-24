@@ -66,11 +66,53 @@ BEGIN
         Longitude    FLOAT             NOT NULL,
         GeofenceName NVARCHAR(100)     NULL,
         Motivo       NVARCHAR(100)     NOT NULL DEFAULT 'Emergencia',
-        Timestamp    DATETIME          NOT NULL DEFAULT GETDATE()
+            Timestamp    DATETIME          NOT NULL DEFAULT GETDATE(),
+            Status       NVARCHAR(20)      NOT NULL DEFAULT 'PENDIENTE',
+            AssignedByUserId UNIQUEIDENTIFIER NULL,
+            AssignedAt   DATETIME          NULL,
+            ClosedByUserId UNIQUEIDENTIFIER NULL,
+            ClosedAt     DATETIME          NULL,
+            CloseObservation NVARCHAR(500)  NULL
     );
     PRINT 'Tabla Incidents creada correctamente.';
 END
 GO
+
+    IF COL_LENGTH('dbo.Incidents', 'Status') IS NULL
+    BEGIN
+        ALTER TABLE Incidents ADD Status NVARCHAR(20) NOT NULL CONSTRAINT DF_Incidents_Status DEFAULT 'PENDIENTE';
+    END
+    GO
+
+    IF COL_LENGTH('dbo.Incidents', 'AssignedByUserId') IS NULL
+    BEGIN
+        ALTER TABLE Incidents ADD AssignedByUserId UNIQUEIDENTIFIER NULL;
+    END
+    GO
+
+    IF COL_LENGTH('dbo.Incidents', 'AssignedAt') IS NULL
+    BEGIN
+        ALTER TABLE Incidents ADD AssignedAt DATETIME NULL;
+    END
+    GO
+
+    IF COL_LENGTH('dbo.Incidents', 'ClosedByUserId') IS NULL
+    BEGIN
+        ALTER TABLE Incidents ADD ClosedByUserId UNIQUEIDENTIFIER NULL;
+    END
+    GO
+
+    IF COL_LENGTH('dbo.Incidents', 'ClosedAt') IS NULL
+    BEGIN
+        ALTER TABLE Incidents ADD ClosedAt DATETIME NULL;
+    END
+    GO
+
+    IF COL_LENGTH('dbo.Incidents', 'CloseObservation') IS NULL
+    BEGIN
+        ALTER TABLE Incidents ADD CloseObservation NVARCHAR(500) NULL;
+    END
+    GO
 
 -- ============================================================
 -- SEED: Zonas del campus Huachi (4 zonas operativas)

@@ -83,7 +83,8 @@ namespace UtaSecurity.Services.Incidents.Tests
             var dto = new IncidentDto
             {
                 incLatitud = -1.23,
-                incLongitud = -78.45
+                incLongitud = -78.45,
+                incUsuarioId = Guid.NewGuid().ToString()
             };
 
             // Act
@@ -109,7 +110,8 @@ namespace UtaSecurity.Services.Incidents.Tests
             var dto = new IncidentDto
             {
                 incLatitud = 0,
-                incLongitud = 0
+                incLongitud = 0,
+                incUsuarioId = Guid.NewGuid().ToString()
             };
 
             // Act
@@ -144,7 +146,8 @@ namespace UtaSecurity.Services.Incidents.Tests
             var dto = new IncidentDto
             {
                 incLatitud = -1.23,
-                incLongitud = -78.45
+                incLongitud = -78.45,
+                incUsuarioId = Guid.NewGuid().ToString()
             };
 
             // Act
@@ -170,7 +173,8 @@ namespace UtaSecurity.Services.Incidents.Tests
             var dto = new IncidentDto
             {
                 incLatitud = -1.23,
-                incLongitud = -78.45
+                incLongitud = -78.45,
+                incUsuarioId = Guid.NewGuid().ToString()
             };
 
             var stopwatch = new Stopwatch();
