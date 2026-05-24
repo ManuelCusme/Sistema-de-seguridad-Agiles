@@ -28,6 +28,15 @@
       ]
     },
     {
+      "UpstreamPathTemplate": "/api/zones/{everything}",
+      "UpstreamMethods": [ "Get", "Options" ],
+      "DownstreamPathTemplate": "/api/zones/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5004 }
+      ]
+    },
+    {
       "UpstreamPathTemplate": "/hubs/alerts/negotiate",
       "UpstreamMethods": [ "Post", "Options" ],
       "DownstreamPathTemplate": "/hubs/alerts/negotiate",

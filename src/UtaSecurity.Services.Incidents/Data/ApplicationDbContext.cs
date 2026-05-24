@@ -10,7 +10,6 @@ namespace UtaSecurity.Services.Incidents.Data
         }
 
         public DbSet<IncidentEntity> Incidents { get; set; }
-        public DbSet<GeofenceEntity> Geofences { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -35,16 +34,6 @@ namespace UtaSecurity.Services.Incidents.Data
                 entity.Property(e => e.CloseObservation).HasMaxLength(500);
             });
 
-            modelBuilder.Entity<GeofenceEntity>(entity =>
-            {
-                entity.ToTable("Geofences");
-                entity.HasKey(e => e.Id);
-                entity.Property(e => e.Id).HasDefaultValueSql("NEWID()");
-                entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
-                entity.Property(e => e.Latitude).IsRequired();
-                entity.Property(e => e.Longitude).IsRequired();
-                entity.Property(e => e.Radius).IsRequired();
-            });
         }
     }
 }
