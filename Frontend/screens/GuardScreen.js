@@ -16,6 +16,7 @@ import * as signalR from '@microsoft/signalr';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
+import { getIncidentByValue } from '../constants/incidentCatalog';
 
 // Coordenadas de las 4 Zonas UTA Huachi
 const ZONES = [
@@ -195,6 +196,8 @@ const GuardScreen = () => {
   };
 
   useEffect(() => {
+    let shouldStopAfterStart = false;
+
     const newConnection = new signalR.HubConnectionBuilder()
       .withUrl("http://192.168.0.5:5000/hubs/alerts")
       .withAutomaticReconnect()
@@ -203,12 +206,14 @@ const GuardScreen = () => {
     newConnection.on("ReceiveAlert", (incidente) => {
       // El backend envía un objeto IncidentDto con campos: incLatitud, incLongitud,
       // incMotivo, incReportadoPor, incFacultad, incGeocercaNombre, incId, incFechaReporte
+      const catalogItem = getIncidentByValue(incidente.incMotivo || 'EMERGENCIA');
       const newAlert = {
         id:       incidente.incId || Date.now().toString(),
         user:     incidente.incReportadoPor || 'Estudiante',
         pos:      { lat: incidente.incLatitud, lng: incidente.incLongitud },
         zone:     incidente.incGeocercaNombre || 'Ubicación desconocida',
-        motivo:   incidente.incMotivo || 'Emergencia',
+        motivo:   catalogItem.label,
+        motivoKey: catalogItem.value,
         facultad: incidente.incFacultad || 'FISEI',
         time:     new Date().toLocaleTimeString(),
         status:   'PENDIENTE' // Estado inicial
@@ -216,19 +221,23 @@ const GuardScreen = () => {
       
       setAlerts(prev => [newAlert, ...prev]);
       Vibration.vibrate([0, 500, 200, 500]);
+    });
 
-      if (mapRef.current) {
-        mapRef.current.animateToRegion({
-          latitude:      incidente.incLatitud,
-          longitude:     incidente.incLongitud,
-          latitudeDelta:  0.005,
-          longitudeDelta: 0.005,
-        }, 1000);
+    const startPromise = newConnection.start().catch(err => {
+      if (!shouldStopAfterStart) {
+        console.error(err);
       }
     });
 
-    newConnection.start().catch(err => console.error(err));
-    return () => newConnection.stop();
+    return () => {
+      shouldStopAfterStart = true;
+      newConnection.off("ReceiveAlert");
+      startPromise.finally(() => {
+        if (newConnection.state === signalR.HubConnectionState.Connected) {
+          newConnection.stop().catch(() => {});
+        }
+      });
+    };
   }, []);
 
   /**
@@ -248,14 +257,14 @@ const GuardScreen = () => {
           labelStyle={styles.acceptButtonLabel}
         >
           {loadingIncidents[alert.id] ? (
-            <>
+            <View style={styles.buttonBusyRow}>
               <ActivityIndicator 
                 size="small" 
                 color="#1B5E20" 
                 style={{marginRight: 8}}
               />
-              Aceptando...
-            </>
+              <Text style={styles.buttonBusyTextGreen}>Aceptando...</Text>
+            </View>
           ) : (
             'Aceptar'
           )}
@@ -274,14 +283,14 @@ const GuardScreen = () => {
           labelStyle={styles.closeButtonLabel}
         >
           {closingIncidents[alert.id] ? (
-            <>
+            <View style={styles.buttonBusyRow}>
               <ActivityIndicator 
                 size="small" 
                 color="#FFFFFF" 
                 style={{marginRight: 8}}
               />
-              Cerrando...
-            </>
+              <Text style={styles.buttonBusyTextWhite}>Cerrando...</Text>
+            </View>
           ) : (
             'Cerrar Caso'
           )}
@@ -296,6 +305,12 @@ const GuardScreen = () => {
         <Title style={styles.headerTitle}>PANEL DE GUARDIA</Title>
         <IconButton icon="logout" iconColor="white" onPress={handleLogout} />
       </Surface>
+
+      <View style={styles.hero}>
+        <Text style={styles.heroKicker}>WAR ROOM UTA</Text>
+        <Text style={styles.heroTitle}>Alertas y zonas en tiempo real</Text>
+        <Text style={styles.heroSubtitle}>Los motivos, colores y estados siguen el mismo lenguaje del panel admin.</Text>
+      </View>
 
       <MapView
         ref={mapRef}
@@ -346,7 +361,7 @@ const GuardScreen = () => {
                     <Paragraph style={{fontSize: 12, marginTop: 4}}>{item.facultad} • {item.zone}</Paragraph>
                     <Paragraph style={{fontSize: 10, color: '#666', marginTop: 2}}>{item.time}</Paragraph>
                   </View>
-                  <Text style={styles.motivoBadge}>{item.motivo.toUpperCase()}</Text>
+                      <Text style={[styles.motivoBadge, { borderColor: getIncidentByValue(item.motivoKey || item.motivo).color, color: getIncidentByValue(item.motivoKey || item.motivo).color }]}>{item.motivo.toUpperCase()}</Text>
                 </View>
               </Card.Content>
               
@@ -422,14 +437,14 @@ const GuardScreen = () => {
                   labelStyle={styles.modalConfirmButtonLabel}
                 >
                   {closingIncidents[selectedAlert?.id] ? (
-                    <>
+                    <View style={styles.buttonBusyRow}>
                       <ActivityIndicator 
                         size="small" 
                         color="white" 
                         style={{marginRight: 8}}
                       />
-                      Confirmando...
-                    </>
+                      <Text style={styles.buttonBusyTextWhite}>Confirmando...</Text>
+                    </View>
                   ) : (
                     'Confirmar Cierre'
                   )}
@@ -445,13 +460,14 @@ const GuardScreen = () => {
 
 const styles = StyleSheet.create({
   container: { 
-    flex: 1 
+    flex: 1,
+    backgroundColor: '#f3f6fb'
   },
   header: {
     paddingTop: 50,
     paddingBottom: 20,
     paddingHorizontal: 20,
-    backgroundColor: '#1B5E20',
+    backgroundColor: '#D32F2F',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -462,8 +478,32 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold'
   },
+  hero: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  heroKicker: {
+    fontSize: 12,
+    letterSpacing: 1.2,
+    color: '#6b7280',
+    fontWeight: '700',
+  },
+  heroTitle: {
+    marginTop: 4,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  heroSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    color: '#6b7280',
+  },
   map: { 
-    flex: 1 
+    flex: 1,
+    marginHorizontal: 16,
+    borderRadius: 20,
+    overflow: 'hidden'
   },
   listContainer: {
     height: 250,
@@ -477,7 +517,8 @@ const styles = StyleSheet.create({
   listTitle: { 
     fontSize: 16, 
     marginBottom: 10,
-    fontWeight: '600'
+    fontWeight: '600',
+    color: '#111827'
   },
   // MEJORAS DE DISEÑO - Tarjetas más atractivas
   card: { 
@@ -512,10 +553,10 @@ const styles = StyleSheet.create({
     color: status === 'PENDIENTE' ? '#D32F2F' : '#FF6F00'
   }),
   motivoBadge: {
-    color: '#D32F2F', 
     fontWeight: 'bold', 
     fontSize: 11,
-    backgroundColor: '#FFEBEE',
+    backgroundColor: '#fff',
+    borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
@@ -550,6 +591,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 0.5
+  },
+  buttonBusyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  buttonBusyTextGreen: {
+    color: '#1B5E20',
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  buttonBusyTextWhite: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600'
   },
   emptyText: { 
     textAlign: 'center', 

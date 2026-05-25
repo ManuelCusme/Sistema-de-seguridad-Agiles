@@ -144,6 +144,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
                 .Select(item => new
                 {
                     incId = item.Id.ToString(),
+                    incUsuarioId = item.UserId,
                     incMotivo = item.Motivo,
                     incZona = item.Zona,
                     incGeocercaNombre = item.GeofenceName,

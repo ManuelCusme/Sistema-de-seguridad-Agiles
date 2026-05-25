@@ -40,35 +40,125 @@ El sistema tiene **3 componentes** que trabajan sincronizados:
 
 ## 🚀 Guía de Inicio (Orden Obligatorio)
 
-### ⚠️ Paso 0 — Configurar Red
-Tu PC y celular deben estar en la **misma red Wi-Fi**.  
-Verificar tu IP local (ej: `192.168.0.5`) y actualizarla en:
-- `Frontend/context/AuthContext.js` → campo `API_URL`
-- `Frontend/screens/GuardScreen.js` → campo `signalR.withUrl`
+### ⚠️ Paso 0 — Configurar Red e IP
+Tu PC y celular deben estar en la **misma red Wi-Fi**.
+
+1. Obtén tu IP local en Windows:
+```powershell
+ipconfig
+```
+Usa la IPv4 (ejemplo: `192.168.0.5`).
+
+2. Actualiza esa IP en la app móvil:
+- `Frontend/context/AuthContext.js` → variable `API_URL`
+- `Frontend/screens/GuardScreen.js` → método `signalR.withUrl(...)`
+
+3. Para Expo LAN, usa también esa IP:
+```powershell
+set REACT_NATIVE_PACKAGER_HOSTNAME=192.168.x.x
+```
+
+> Nota: El Panel Web Admin (`AdminWeb`) usa `window.location.hostname`, por lo que normalmente no requiere cambiar IP manualmente.
 
 ---
 
-### Paso 1 — Iniciar el Backend
-```powershell
-cd Backend/SeguridadUta.Api
-dotnet run --urls "http://0.0.0.0:5000"
-```
-> Restaura librerías C# automáticamente en el primer arranque.
+### Paso 1 — Restaurar dependencias del repositorio
 
-### Paso 2 — Iniciar el Panel Web (Admin)
+Desde la raíz del proyecto:
+```powershell
+dotnet restore UtaSecurity.sln
+```
+
+Panel Web:
 ```powershell
 cd AdminWeb
-npm install        # solo la primera vez
+npm install
+```
+
+App móvil:
+```powershell
+cd ../Frontend
+npm install
+```
+
+---
+
+### Paso 2 — Levantar Backend (Opción A: Terminales)
+
+Abre **4 terminales** en paralelo desde la raíz del repo:
+
+Terminal 1 (Gateway):
+```powershell
+dotnet run --project src/UtaSecurity.Gateway/UtaSecurity.Gateway.csproj --urls "http://0.0.0.0:5000"
+```
+
+Terminal 2 (Identity):
+```powershell
+dotnet run --project src/UtaSecurity.Services.Identity/UtaSecurity.Services.Identity.csproj --urls "http://0.0.0.0:5001"
+```
+
+Terminal 3 (Incidents):
+```powershell
+dotnet run --project src/UtaSecurity.Services.Incidents/UtaSecurity.Services.Incidents.csproj --urls "http://0.0.0.0:5003"
+```
+
+Terminal 4 (Zones):
+```powershell
+dotnet run --project src/UtaSecurity.Services.Zones/UtaSecurity.Services.Zones.csproj --urls "http://0.0.0.0:5004"
+```
+
+Puertos esperados:
+- Gateway: `5000`
+- Identity: `5001`
+- Incidents: `5003`
+- Zones: `5004`
+
+> Si solo quieres probar login del panel admin, el mínimo es: **Gateway (5000) + Identity (5001)**.
+
+---
+
+### Paso 2 (Alternativa) — Levantar Backend con UtaSecurity.sln (Visual Studio)
+
+Sí, **sí se puede** levantar con `UtaSecurity.sln`.
+
+1. Abre `UtaSecurity.sln` en Visual Studio 2022.
+2. Clic derecho en la solución → **Set Startup Projects...**.
+3. Selecciona **Multiple startup projects**.
+4. Marca en **Start** estos proyectos:
+        - `UtaSecurity.Gateway`
+        - `UtaSecurity.Services.Identity`
+        - `UtaSecurity.Services.Incidents`
+        - `UtaSecurity.Services.Zones`
+5. Ejecuta (F5 o Ctrl+F5).
+
+Con esto, Visual Studio levanta todos los microservicios en paralelo usando sus `launchSettings.json`.
+
+---
+
+### Paso 3 — Levantar el Panel Web (Admin)
+
+```powershell
+cd AdminWeb
 npm run dev
 ```
 
-### Paso 3 — Iniciar la App Móvil
+Acceso recomendado:
+- `http://localhost:5173/login`
+
+Credencial admin de prueba:
+- Email: `admin@uta.edu.ec`
+- Contraseña: `admin123`
+
+---
+
+### Paso 4 — Levantar la App Móvil
+
 ```powershell
 cd Frontend
-npm install        # solo la primera vez
 set REACT_NATIVE_PACKAGER_HOSTNAME=192.168.x.x
 npx expo start --lan
 ```
+
 Escanear el QR con **Expo Go** en el celular.
 
 ---
