@@ -83,6 +83,11 @@ using (var scope = app.Services.CreateScope())
         BEGIN
             ALTER TABLE Incidents ADD CloseObservation NVARCHAR(500) NULL;
         END;
+
+        IF COL_LENGTH('dbo.Incidents', 'Zona') IS NULL
+        BEGIN
+            ALTER TABLE Incidents ADD Zona NVARCHAR(100) NOT NULL CONSTRAINT DF_Incidents_Zona DEFAULT 'No disponible';
+        END;
     ");
 }
 

@@ -4,6 +4,8 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
+    "start:lan": "set NODE_OPTIONS=--max-old-space-size=4096 && expo start --lan",
+    "start:clear": "set NODE_OPTIONS=--max-old-space-size=4096 && expo start --clear --lan",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",

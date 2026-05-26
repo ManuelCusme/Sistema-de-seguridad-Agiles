@@ -16,3 +16,12 @@ obj/
 
 ## Paquetes NuGet (se restauran automáticamente)
 packages/
+
+# Ignore local frontend mockups and visual artifacts
+/Frontend/student-mockup.html
+/Frontend/mobile-mockups.md
+
+# Local mockup folders / test artifacts
+/AdminWeb/mockup/
+/Frontend/constants/
+/Frontend/jest-result.json
