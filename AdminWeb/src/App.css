@@ -98,6 +98,13 @@ button {
 }
 
 .tab {
+  .incident-card__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 10px;
+  }
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -118,6 +125,20 @@ button {
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   font-weight: 700;
+  .incident-card__dismiss,
+  .alerts-drawer__remove {
+    appearance: none;
+    border: 1px solid rgba(244, 92, 171, 0.18);
+    background: rgba(244, 92, 171, 0.08);
+    color: #d9468f;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+    white-space: nowrap;
+  }
 }
 
 .sidebar__note,
@@ -129,6 +150,12 @@ button {
 }
 
 .sidebar__note {
+  .incident-card__dismiss:hover,
+  .alerts-drawer__remove:hover {
+    transform: translateY(-1px);
+    background: rgba(244, 92, 171, 0.14);
+    border-color: rgba(244, 92, 171, 0.28);
+  }
   display: flex;
   gap: 10px;
   line-height: 1.5;
@@ -677,6 +704,11 @@ button {
 .incident-list {
   display: grid;
   gap: 12px;
+  /* Prevent the incident list from growing the page height
+     by constraining its max height and enabling vertical scroll. */
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 .incident-list__header {
@@ -1071,6 +1103,112 @@ button {
 .alerts-drawer__item p {
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+/* History layout and modal */
+.layout--history .panel--wide {
+  height: auto;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 20, 0.5);
+  display: grid;
+  place-items: center;
+  z-index: 2000;
+}
+
+.modal-card {
+  width: min(760px, calc(100% - 48px));
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(12, 18, 30, 0.25);
+  overflow: hidden;
+}
+
+.modal-card--compact {
+  width: min(620px, calc(100% - 48px));
+}
+
+.modal-card__header { padding: 18px; border-bottom: 1px solid var(--border); }
+.modal-card__body { padding: 16px; }
+.modal-card__footer { padding: 12px; display:flex; justify-content:flex-end; gap:8px; }
+
+.modal-field {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.modal-field textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  resize: vertical;
+  min-height: 120px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+}
+
+.modal-help {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.close-reason-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.close-reason-pill {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.close-reason-pill:hover {
+  transform: translateY(-1px);
+  border-color: rgba(77, 130, 255, 0.35);
+}
+
+.close-reason-pill--active {
+  background: rgba(77, 130, 255, 0.12);
+  border-color: rgba(77, 130, 255, 0.4);
+  color: #2553c7;
+}
+
+.toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2100;
+  padding: 14px 18px;
+  border-radius: 999px;
+  box-shadow: 0 16px 30px rgba(12, 18, 30, 0.18);
+  color: #fff;
+  font-weight: 700;
+  max-width: min(420px, calc(100vw - 48px));
+}
+
+.toast--success {
+  background: linear-gradient(135deg, #0f9d75, #40d6a5);
+}
+
+.toast--error {
+  background: linear-gradient(135deg, #c62857, #ff4fa3);
 }
 
 .leaflet-container {

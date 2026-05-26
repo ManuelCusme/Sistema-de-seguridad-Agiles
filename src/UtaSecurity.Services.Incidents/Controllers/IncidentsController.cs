@@ -191,6 +191,17 @@ namespace UtaSecurity.Services.Incidents.Controllers
 
             await _context.SaveChangesAsync();
 
+            await _hubContext.Clients.All.SendAsync("ReceiveIncidentUpdate", new
+            {
+                incId = incident.Id.ToString(),
+                incEstado = incident.Status,
+                incAsignadoPor = incident.AssignedByUserId?.ToString(),
+                incAsignadoEn = incident.AssignedAt,
+                incZona = incident.Zona,
+                incGeocercaNombre = incident.GeofenceName,
+                incObservacion = incident.CloseObservation
+            });
+
             return Ok(new
             {
                 success = true,
@@ -230,6 +241,19 @@ namespace UtaSecurity.Services.Incidents.Controllers
             incident.CloseObservation = request.incObservacion.Trim();
 
             await _context.SaveChangesAsync();
+
+            await _hubContext.Clients.All.SendAsync("ReceiveIncidentUpdate", new
+            {
+                incId = incident.Id.ToString(),
+                incEstado = incident.Status,
+                incCerradoPor = incident.ClosedByUserId?.ToString(),
+                incCerradoEn = incident.ClosedAt,
+                incAsignadoPor = incident.AssignedByUserId?.ToString(),
+                incAsignadoEn = incident.AssignedAt,
+                incZona = incident.Zona,
+                incGeocercaNombre = incident.GeofenceName,
+                incObservacion = incident.CloseObservation
+            });
 
             return Ok(new
             {
