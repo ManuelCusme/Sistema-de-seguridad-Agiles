@@ -1016,6 +1016,8 @@ function App({ onLogout, session }) {
                       <option value="EMERGENCIA">Emergencia</option>
                       <option value="ROBO">Robo</option>
                       <option value="SOSPECHOSO">Sospechoso</option>
+                      <option value="MEDICO">Médico</option>
+                      <option value="INCENDIO">Incendio</option>
                       <option value="AGRESIÓN">Agresión</option>
                     </select>
                   </label>
@@ -1173,6 +1175,8 @@ function App({ onLogout, session }) {
                     <option value="EMERGENCIA">Emergencia</option>
                     <option value="ROBO">Robo</option>
                     <option value="SOSPECHOSO">Sospechoso</option>
+                    <option value="MEDICO">Médico</option>
+                    <option value="INCENDIO">Incendio</option>
                     <option value="AGRESIÓN">Agresión</option>
                   </select>
                 </label>
