@@ -59,7 +59,7 @@ L.Icon.Default.mergeOptions({
 const zones = [
   {
     id: 'Z1',
-    label: 'FACULTAD DE INGENIERÍA',
+    label: 'Zona 1',
     color: '#f45cab',
     positions: [
       [-1.266416, -78.625301],
@@ -70,7 +70,7 @@ const zones = [
   },
   {
     id: 'Z2',
-    label: 'BIBLIOTECA GENERAL',
+    label: 'Zona 2',
     color: '#4d82ff',
     positions: [
       [-1.26648, -78.624212],
@@ -81,7 +81,7 @@ const zones = [
   },
   {
     id: 'Z3',
-    label: 'RECTORADO / ADMINISTRACIÓN',
+    label: 'Zona 3',
     color: '#40d6a5',
     positions: [
       [-1.268564, -78.62584],
@@ -92,7 +92,7 @@ const zones = [
   },
   {
     id: 'Z4',
-    label: 'COMPLEJO DEPORTIVO',
+    label: 'Zona 4',
     color: '#f7c948',
     positions: [
       [-1.268564, -78.624212],
@@ -109,7 +109,7 @@ const seedIncidents = [
   {
     id: 'INC-123',
     motivo: 'ROBO',
-    zone: 'BIBLIOTECA GENERAL',
+    zone: 'Zona 2',
     user: 'Estudiante de Ingeniería',
     faculty: 'FISEI',
     status: 'Activo',
@@ -120,7 +120,7 @@ const seedIncidents = [
   {
     id: 'INC-122',
     motivo: 'AGRESIÓN',
-    zone: 'COMPLEJO DEPORTIVO',
+    zone: 'Zona 4',
     user: 'Estudiante de Administración',
     faculty: 'FCA',
     status: 'Asignado',
@@ -131,7 +131,7 @@ const seedIncidents = [
   {
     id: 'INC-121',
     motivo: 'SOSPECHOSO',
-    zone: 'RECTORADO / ADMINISTRACIÓN',
+    zone: 'Zona 3',
     user: 'Personal externo',
     faculty: 'Sin registro',
     status: 'Activo',
@@ -142,7 +142,7 @@ const seedIncidents = [
   {
     id: 'INC-120',
     motivo: 'EMERGENCIA',
-    zone: 'FACULTAD DE INGENIERÍA',
+    zone: 'Zona 1',
     user: 'Estudiante de Mecánica',
     faculty: 'FISEI',
     status: 'Cerrado',
@@ -1016,6 +1016,8 @@ function App({ onLogout, session }) {
                       <option value="EMERGENCIA">Emergencia</option>
                       <option value="ROBO">Robo</option>
                       <option value="SOSPECHOSO">Sospechoso</option>
+                      <option value="MEDICO">Médico</option>
+                      <option value="INCENDIO">Incendio</option>
                       <option value="AGRESIÓN">Agresión</option>
                     </select>
                   </label>
@@ -1173,6 +1175,8 @@ function App({ onLogout, session }) {
                     <option value="EMERGENCIA">Emergencia</option>
                     <option value="ROBO">Robo</option>
                     <option value="SOSPECHOSO">Sospechoso</option>
+                    <option value="MEDICO">Médico</option>
+                    <option value="INCENDIO">Incendio</option>
                     <option value="AGRESIÓN">Agresión</option>
                   </select>
                 </label>

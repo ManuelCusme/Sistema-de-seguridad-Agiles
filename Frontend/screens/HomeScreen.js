@@ -18,6 +18,26 @@ import { Picker } from '@react-native-picker/picker';
 import { INCIDENT_CATALOG, INCIDENT_DEFAULT, getIncidentByValue } from '../constants/incidentCatalog';
 
 const DRAWER_WIDTH = 236;
+const GUAYAQUIL_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+const parseBackendDate = (value) => {
+  if (!value) return null;
+
+  if (value instanceof Date) return value;
+
+  const text = String(value);
+  const hasTimeZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(text);
+  const date = new Date(hasTimeZone ? text : `${text}Z`);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const normalizeUserId = (value) => String(value || '').trim().toLowerCase();
+
+const toGuayaquilDate = (value) => {
+  const date = parseBackendDate(value);
+  return date ? new Date(date.getTime() - GUAYAQUIL_OFFSET_MS) : null;
+};
 
 const HomeScreen = () => {
   const navigation = useNavigation();
@@ -34,6 +54,7 @@ const HomeScreen = () => {
   const [selectedHistory, setSelectedHistory] = useState(null);
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [userDirectory, setUserDirectory] = useState({});
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -44,8 +65,13 @@ const HomeScreen = () => {
   const myUserId = String(user?.id || user?.Id || '');
 
   useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    loadUsers();
     loadHistory();
-  }, []);
+  }, [token]);
 
   const openDrawer = () => {
     setDrawerVisible(true);
@@ -119,6 +145,56 @@ const HomeScreen = () => {
     }
   };
 
+  const loadUsers = async () => {
+    if (!token) {
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_URL}/identity/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const users = Array.isArray(response.data) ? response.data : [];
+      const directory = users.reduce((accumulator, item) => {
+        const userId = normalizeUserId(item.usuId);
+        if (!userId) {
+          return accumulator;
+        }
+
+        const displayName = [item.usuNombre1, item.usuApellido1]
+          .filter(Boolean)
+          .join(' ')
+          .trim() || item.usuEmail || userId;
+
+        accumulator[userId] = {
+          displayName,
+          role: item.usuRole || '',
+        };
+
+        return accumulator;
+      }, {});
+
+      setUserDirectory(directory);
+    } catch (error) {
+      console.error('No se pudo cargar el directorio de usuarios:', error.message);
+    }
+  };
+
+  const resolveUserName = (userId, isClosed = false) => {
+    const normalizedId = normalizeUserId(userId);
+    if (!normalizedId) {
+      return isClosed ? 'Cerrado desde Admin' : 'Sin asignar';
+    }
+
+    const entry = userDirectory[normalizedId];
+    if (entry?.displayName) {
+      return entry.role === 'Admin' ? `${entry.displayName} (Admin)` : entry.displayName;
+    }
+
+    return isClosed ? 'Cerrado desde Admin' : 'Usuario institucional';
+  };
+
   const handlePressIn = () => {
     Animated.parallel([
       Animated.timing(scaleAnim, { toValue: 0.9, duration: 200, useNativeDriver: true }),
@@ -174,12 +250,8 @@ const HomeScreen = () => {
   };
 
   const formatDate = (value) => {
-    if (!value) {
-      return 'No disponible';
-    }
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
+    const date = toGuayaquilDate(value);
+    if (!date || Number.isNaN(date.getTime())) {
       return 'No disponible';
     }
 
@@ -187,22 +259,20 @@ const HomeScreen = () => {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
+      timeZone: 'UTC',
     });
   };
 
   const formatTime = (value) => {
-    if (!value) {
-      return 'No disponible';
-    }
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
+    const date = toGuayaquilDate(value);
+    if (!date || Number.isNaN(date.getTime())) {
       return 'No disponible';
     }
 
     return date.toLocaleTimeString('es-EC', {
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'UTC',
     });
   };
 
@@ -314,7 +384,7 @@ const HomeScreen = () => {
             Zona: {item.incZona || item.incGeocercaNombre || 'Ubicación desconocida'}
           </Text>
           <Text style={styles.historyItemMeta}>
-            Guardia: {item.incCerradoPor || item.incAsignadoPor || 'Sin asignar'}
+            Responsable: {resolveUserName(item.incCerradoPor || item.incAsignadoPor, item.incEstado === 'CERRADO')}
           </Text>
         </Surface>
       </TouchableOpacity>
@@ -422,8 +492,15 @@ const HomeScreen = () => {
                 <Text style={styles.modalValue}>{status}</Text>
               </View>
               <View style={styles.modalRow}>
-                <Text style={styles.modalLabel}>Guardia</Text>
-                <Text style={styles.modalValue}>{selectedHistory.incCerradoPor || selectedHistory.incAsignadoPor || 'Sin asignar'}</Text>
+                <Text style={styles.modalLabel}>{status === 'CERRADO' ? 'Cerrado por' : 'Asignado por'}</Text>
+                <Text style={styles.modalValue}>
+                  {resolveUserName(
+                    status === 'CERRADO'
+                      ? selectedHistory.incCerradoPor || selectedHistory.incAsignadoPor
+                      : selectedHistory.incAsignadoPor || selectedHistory.incCerradoPor,
+                    status === 'CERRADO'
+                  )}
+                </Text>
               </View>
               <View style={styles.modalRow}>
                 <Text style={styles.modalLabel}>Zona</Text>
