@@ -15,7 +15,7 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
-import { INCIDENT_CATALOG, getIncidentByValue } from '../constants/incidentCatalog';
+import { INCIDENT_CATALOG, INCIDENT_DEFAULT, getIncidentByValue } from '../constants/incidentCatalog';
 
 const DRAWER_WIDTH = 236;
 
@@ -25,7 +25,7 @@ const HomeScreen = () => {
 
   const [activeSection, setActiveSection] = useState('alert');
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [motivo, setMotivo] = useState(INCIDENT_CATALOG[3].value);
+  const [motivo, setMotivo] = useState(INCIDENT_DEFAULT.value);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [history, setHistory] = useState([]);
