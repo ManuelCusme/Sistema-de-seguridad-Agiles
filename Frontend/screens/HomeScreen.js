@@ -18,7 +18,7 @@ import { Picker } from '@react-native-picker/picker';
 import { INCIDENT_CATALOG, INCIDENT_DEFAULT, getIncidentByValue } from '../constants/incidentCatalog';
 
 const DRAWER_WIDTH = 236;
-const LOCAL_TIME_ZONE = 'America/Guayaquil';
+const GUAYAQUIL_OFFSET_MS = 5 * 60 * 60 * 1000;
 
 const parseBackendDate = (value) => {
   if (!value) return null;
@@ -30,6 +30,13 @@ const parseBackendDate = (value) => {
   const date = new Date(hasTimeZone ? text : `${text}Z`);
 
   return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const normalizeUserId = (value) => String(value || '').trim().toLowerCase();
+
+const toGuayaquilDate = (value) => {
+  const date = parseBackendDate(value);
+  return date ? new Date(date.getTime() - GUAYAQUIL_OFFSET_MS) : null;
 };
 
 const HomeScreen = () => {
@@ -150,7 +157,7 @@ const HomeScreen = () => {
 
       const users = Array.isArray(response.data) ? response.data : [];
       const directory = users.reduce((accumulator, item) => {
-        const userId = String(item.usuId || '').trim();
+        const userId = normalizeUserId(item.usuId);
         if (!userId) {
           return accumulator;
         }
@@ -175,7 +182,7 @@ const HomeScreen = () => {
   };
 
   const resolveUserName = (userId, isClosed = false) => {
-    const normalizedId = String(userId || '').trim();
+    const normalizedId = normalizeUserId(userId);
     if (!normalizedId) {
       return isClosed ? 'Cerrado desde Admin' : 'Sin asignar';
     }
@@ -185,7 +192,7 @@ const HomeScreen = () => {
       return entry.role === 'Admin' ? `${entry.displayName} (Admin)` : entry.displayName;
     }
 
-    return isClosed ? 'Cerrado desde Admin' : normalizedId;
+    return isClosed ? 'Cerrado desde Admin' : 'Usuario institucional';
   };
 
   const handlePressIn = () => {
@@ -243,7 +250,7 @@ const HomeScreen = () => {
   };
 
   const formatDate = (value) => {
-    const date = parseBackendDate(value);
+    const date = toGuayaquilDate(value);
     if (!date || Number.isNaN(date.getTime())) {
       return 'No disponible';
     }
@@ -252,12 +259,12 @@ const HomeScreen = () => {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
-      timeZone: LOCAL_TIME_ZONE,
+      timeZone: 'UTC',
     });
   };
 
   const formatTime = (value) => {
-    const date = parseBackendDate(value);
+    const date = toGuayaquilDate(value);
     if (!date || Number.isNaN(date.getTime())) {
       return 'No disponible';
     }
@@ -265,7 +272,7 @@ const HomeScreen = () => {
     return date.toLocaleTimeString('es-EC', {
       hour: '2-digit',
       minute: '2-digit',
-      timeZone: LOCAL_TIME_ZONE,
+      timeZone: 'UTC',
     });
   };
 
