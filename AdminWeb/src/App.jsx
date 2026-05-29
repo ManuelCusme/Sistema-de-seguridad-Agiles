@@ -1060,6 +1060,9 @@ function App({ onLogout, session }) {
                     <strong>Filtros</strong>
                     <button type="button" onClick={() => setMapFiltersOpen(false)}>Cerrar</button>
                   </div>
+                  <button type="button" className="filter-reset-btn" onClick={clearFilters}>
+                    Todo por defecto
+                  </button>
                 <div className="filters">
                   <label>
                     Zona
@@ -1265,6 +1268,9 @@ function App({ onLogout, session }) {
 
             {statsFilterOpen && (
               <div className="stats-filters-panel">
+                <button type="button" className="filter-reset-btn filter-reset-btn--wide" onClick={clearFilters}>
+                  Todo por defecto
+                </button>
                 <label>
                   Tipo
                   <select value={filterMotivo} onChange={(e) => setFilterMotivo(e.target.value)}>
