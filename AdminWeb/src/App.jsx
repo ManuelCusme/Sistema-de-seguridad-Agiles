@@ -939,6 +939,19 @@ function App({ onLogout, session }) {
           <span>En línea</span>
           <strong>{connected ? 'SignalR activo' : 'Conectando...'}</strong>
         </div>
+
+        {onLogout && (
+          <div className="sidebar__footer">
+            <div className="user-chip user-chip--sidebar" title={`${session?.role || 'Sin rol'} · ${session?.email || ''}`}>
+              <span className="user-chip__avatar">{(session?.displayName || 'A').charAt(0).toUpperCase()}</span>
+              <div>
+                <strong>{session?.displayName || 'Usuario'}</strong>
+                <span>{session?.role || 'Admin'}</span>
+              </div>
+            </div>
+            <button className="sidebar-logout" type="button" onClick={onLogout} title="Cerrar sesión">Cerrar sesión</button>
+          </div>
+        )}
       </aside>
 
       <main className="workspace">
@@ -947,22 +960,13 @@ function App({ onLogout, session }) {
             Abrir panel
           </button>
         )}
-        <header className="topbar">
+        <header className={`topbar ${view === 'mapa' ? 'topbar--map' : ''}`}>
           <div>
             <h2>{view === 'mapa' ? 'Mapa operacional' : 'Estadísticas del campus'}</h2>
-            <p>{view === 'mapa' ? 'Zonas, filtros e incidencias en tiempo real' : 'Resumen, tendencias y distribución de incidentes'}</p>
+            {view !== 'mapa' && <p>Resumen, tendencias y distribución de incidentes</p>}
           </div>
 
           <div className="topbar__actions">
-            {onLogout && (
-              <div className="user-chip" title={`${session?.role || 'Sin rol'} · ${session?.email || ''}`}>
-                <span className="user-chip__avatar">{(session?.displayName || 'A').charAt(0).toUpperCase()}</span>
-                <div>
-                  <strong>{session?.displayName || 'Usuario'}</strong>
-                  <span>{session?.role || 'Admin'}</span>
-                </div>
-              </div>
-            )}
             <label className="searchbox">
               <Search size={16} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar..." />
@@ -977,7 +981,6 @@ function App({ onLogout, session }) {
               <Bell size={16} />
               Incidencias
             </button>
-            {onLogout && <button className="ghost-btn" type="button" onClick={onLogout} title="Cerrar sesión">Cerrar sesión</button>}
           </div>
         </header>
 
