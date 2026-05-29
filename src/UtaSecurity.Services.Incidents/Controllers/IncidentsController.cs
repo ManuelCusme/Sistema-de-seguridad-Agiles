@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using UtaSecurity.Services.Incidents.Hubs;
 using UtaSecurity.Services.Incidents.Models;
 using UtaSecurity.Services.Incidents.Data;
+using UtaSecurity.Services.Incidents.Services;
 
 namespace UtaSecurity.Services.Incidents.Controllers
 {
@@ -102,6 +103,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
 
             // Transmitir la alerta a todos los guardias conectados por WebSocket
             await _hubContext.Clients.All.SendAsync("ReceiveAlert", objNuevaAlerta);
+            await ExpoPushNotificationService.NotifyIncidentAsync(_httpClientFactory, objNuevaAlerta, _logger);
 
             // Guardar en Base de Datos
             try

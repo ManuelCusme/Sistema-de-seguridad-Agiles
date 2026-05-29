@@ -31,6 +31,12 @@ builder.Services.AddHttpClient("ZoneService", client =>
     client.Timeout = TimeSpan.FromMilliseconds(400);
 });
 
+builder.Services.AddHttpClient("ExpoPush", client =>
+{
+    client.BaseAddress = new Uri("https://exp.host");
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+
 // --- POLÍTICA DE CORS PARA EL MICROSERVICIO ---
 // Acepta peticiones directas en desarrollo desde el Gateway, React y Metro Bundler
 builder.Services.AddCors(options =>

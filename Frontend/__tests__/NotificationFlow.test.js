@@ -9,12 +9,20 @@ import { API_URL } from '../config/network';
 // Mock dependencias
 jest.mock('expo-notifications', () => ({
   setNotificationHandler: jest.fn(),
+  addNotificationReceivedListener: jest.fn(),
   addNotificationResponseReceivedListener: jest.fn(),
   removeNotificationSubscription: jest.fn(),
   getPermissionsAsync: jest.fn(() => Promise.resolve({ status: 'granted' })),
   requestPermissionsAsync: jest.fn(() => Promise.resolve({ status: 'granted' })),
   getExpoPushTokenAsync: jest.fn(() => Promise.resolve({ data: 'mock-push-token-123' })),
   setNotificationChannelAsync: jest.fn(),
+  registerTaskAsync: jest.fn(() => Promise.resolve(null)),
+  AndroidImportance: { MAX: 'max' },
+}));
+
+jest.mock('expo-task-manager', () => ({
+  defineTask: jest.fn(),
+  isTaskRegisteredAsync: jest.fn(() => Promise.resolve(false)),
 }));
 
 jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'));
@@ -74,7 +82,11 @@ describe('Flujo de Notificaciones Push - Guardia', () => {
     await waitFor(() => {
       expect(mockAxios.history.post).toBeDefined();
       expect(mockAxios.history.post.length).toBeGreaterThan(0);
-      expect(JSON.parse(mockAxios.history.post[0].data)).toEqual({ token: 'mock-push-token-123' });
+      expect(JSON.parse(mockAxios.history.post[0].data)).toEqual({
+        token: 'mock-push-token-123',
+        platform: 'ios',
+        role: 'guardia',
+      });
     });
   });
 
@@ -90,6 +102,8 @@ describe('Flujo de Notificaciones Push - Guardia', () => {
     
     expect(result).toEqual({
       shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
       shouldPlaySound: true,
       shouldSetBadge: true,
     });

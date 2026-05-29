@@ -4,6 +4,9 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { PaperProvider } from 'react-native-paper';
 import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
+import * as TaskManager from 'expo-task-manager';
+import * as Device from 'expo-device';
 import axios from 'axios';
 
 import LoginScreen from './screens/LoginScreen';
@@ -15,6 +18,27 @@ import { AuthProvider } from './context/AuthContext';
 import { API_URL } from './config/network';
 
 const Stack = createStackNavigator();
+const BACKGROUND_NOTIFICATION_TASK = 'UTA_SECURITY_BACKGROUND_NOTIFICATION';
+const INCIDENT_NOTIFICATION_CHANNEL = 'incidents';
+
+TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, ({ data, error }) => {
+  if (error) {
+    console.warn('Error procesando notificacion en background:', error);
+    return;
+  }
+
+  console.log('Notificacion recibida en background:', data);
+});
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 export default function App() {
   const navigationRef = useRef();
@@ -26,6 +50,9 @@ export default function App() {
       Constants.executionEnvironment === 'storeClient' ||
       Constants.executionEnvironment === 'browser';
 
+    let responseListener = null;
+    let foregroundListener = null;
+
     if (isExpoGo) {
       if (!pushWarningShown.current) {
         console.warn('Expo Go no soporta push remoto en SDK 53+. Usa una development build para notificaciones push.');
@@ -34,31 +61,24 @@ export default function App() {
       return undefined;
     }
 
-    let notificationsModule = null;
-    let responseListener = null;
-
     const setupPush = async () => {
       try {
-        const Notifications = require('expo-notifications');
-        const Device = require('expo-device');
+        await registerBackgroundNotificationTask();
 
-        notificationsModule = Notifications;
-
-        // Handle notifications when app is in foreground
-        Notifications.setNotificationHandler({
-          handleNotification: async () => ({
-            shouldShowAlert: true,
-            shouldPlaySound: true,
-            shouldSetBadge: true,
-          }),
-        });
-
-        const token = await registerForPushNotificationsAsync(Notifications, Device);
+        const token = await registerForPushNotificationsAsync();
         if (token) {
-          axios.post(`${API_URL}/notifications/register-token`, { token })
+          axios.post(`${API_URL}/notifications/register-token`, {
+            token,
+            platform: Platform.OS,
+            role: 'guardia',
+          })
             .then(() => console.log('Push Token registrado en backend:', token))
             .catch(err => console.error('Error registrando token', err));
         }
+
+        foregroundListener = Notifications.addNotificationReceivedListener(notification => {
+          console.log('Notificacion recibida en foreground:', notification?.request?.content?.data);
+        });
 
         responseListener = Notifications.addNotificationResponseReceivedListener(response => {
           const data = response.notification.request.content.data;
@@ -79,8 +99,12 @@ export default function App() {
     setupPush();
 
     return () => {
-      if (notificationsModule && responseListener) {
-        notificationsModule.removeNotificationSubscription(responseListener);
+      if (responseListener) {
+        Notifications.removeNotificationSubscription(responseListener);
+      }
+
+      if (foregroundListener) {
+        Notifications.removeNotificationSubscription(foregroundListener);
       }
     };
   }, []);
@@ -102,7 +126,15 @@ export default function App() {
   );
 }
 
-async function registerForPushNotificationsAsync(Notifications, Device) {
+async function registerBackgroundNotificationTask() {
+  const alreadyRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_NOTIFICATION_TASK);
+
+  if (!alreadyRegistered) {
+    await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
+  }
+}
+
+async function registerForPushNotificationsAsync() {
   let token;
 
   const isExpoGo = Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient';
@@ -112,11 +144,12 @@ async function registerForPushNotificationsAsync(Notifications, Device) {
   }
 
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
+    await Notifications.setNotificationChannelAsync(INCIDENT_NOTIFICATION_CHANNEL, {
+      name: 'Incidencias UTA',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF231F7C',
+      lightColor: '#0b3354',
+      sound: 'default',
     });
   }
 
@@ -132,8 +165,9 @@ async function registerForPushNotificationsAsync(Notifications, Device) {
       return null;
     }
     try {
-      const projectId = "uta-security-sprint2"; // Proyecto expo mock
-      token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      const projectId = Constants.easConfig?.projectId || Constants.expoConfig?.extra?.eas?.projectId;
+      const tokenOptions = projectId ? { projectId } : undefined;
+      token = (await Notifications.getExpoPushTokenAsync(tokenOptions)).data;
     } catch (e) {
       console.log('Error al obtener push token', e);
     }
