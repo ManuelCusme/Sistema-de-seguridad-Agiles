@@ -751,8 +751,8 @@ const GuardScreen = () => {
                   <Paragraph style={styles.cardTime}>{item.time}</Paragraph>
                   {!!item.observation && activeTab === 'historial' && <Paragraph style={styles.cardObservation}>Observación: {item.observation}</Paragraph>}
                 </View>
-                <Text style={[styles.motivoBadge, { borderColor: getIncidentByValue(item.motivoKey || item.motivo).color, color: getIncidentByValue(item.motivoKey || item.motivo).color }]}>{item.motivo.toUpperCase()}</Text>
               </View>
+              <Text style={[styles.motivoBadge, { borderColor: getIncidentByValue(item.motivoKey || item.motivo).color, color: getIncidentByValue(item.motivoKey || item.motivo).color }]}>{item.motivo.toUpperCase()}</Text>
             </Card.Content>
 
             <Card.Actions style={styles.cardActions}>
@@ -1247,14 +1247,17 @@ const styles = StyleSheet.create({
   },
   cardTitleRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 10,
   },
   cardTitle: { 
     fontSize: 14, 
     fontWeight: 'bold',
-    color: '#1B1B1B'
+    color: '#1B1B1B',
+    flex: 1,
+    minWidth: 120,
   },
   cardMeta: {
     fontSize: 12,
@@ -1277,6 +1280,8 @@ const styles = StyleSheet.create({
     color: status === 'PENDIENTE' ? '#D32F2F' : '#FF6F00'
   }),
   motivoBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
     fontWeight: 'bold', 
     fontSize: 11,
     backgroundColor: '#fff',

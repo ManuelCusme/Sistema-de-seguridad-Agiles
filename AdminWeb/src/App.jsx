@@ -317,10 +317,10 @@ const MAP_OPTIONS = {
   zoomControl: true,
   scrollWheelZoom: true,
   doubleClickZoom: true,
-  dragging: false,
+  dragging: true,
   touchZoom: true,
-  boxZoom: false,
-  keyboard: false,
+  boxZoom: true,
+  keyboard: true,
 };
 
 function RecenterMap({ resetKey }) {
@@ -487,6 +487,8 @@ function App({ onLogout, session }) {
   const [query, setQuery] = useState('');
   const [activeCoords, setActiveCoords] = useState(null);
   const [alertsDrawerOpen, setAlertsDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mapFiltersOpen, setMapFiltersOpen] = useState(false);
   const [statsFilterOpen, setStatsFilterOpen] = useState(false);
   const [statsScope, setStatsScope] = useState('all');
   const [statsRange, setStatsRange] = useState('7D');
@@ -787,13 +789,6 @@ function App({ onLogout, session }) {
     return { active, assigned, closed, avgResponse };
   }, [alerts]);
 
-  const summaryStats = useMemo(() => ({
-    total: filteredAlerts.length,
-    active: filteredAlerts.filter((item) => item.status === 'Activo').length,
-    assigned: filteredAlerts.filter((item) => item.status === 'Asignado').length,
-    closed: filteredAlerts.filter((item) => item.status === 'Cerrado').length,
-  }), [filteredAlerts]);
-
   const statsRangeAlerts = useMemo(() => {
     const limitMs = getRangeLimitMs(statsRange);
 
@@ -917,10 +912,13 @@ function App({ onLogout, session }) {
   }, [query, filterZone, filterMotivo, statsRange]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''}`}>
       <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" />
 
       <aside className="sidebar">
+        <button className="sidebar-toggle sidebar-toggle--inside" type="button" onClick={() => setSidebarCollapsed(true)}>
+          Cerrar panel
+        </button>
         <div className="brand">
           <div className="brand__mark">UTA</div>
           <div>
@@ -944,6 +942,11 @@ function App({ onLogout, session }) {
       </aside>
 
       <main className="workspace">
+        {sidebarCollapsed && (
+          <button className="sidebar-toggle sidebar-toggle--floating" type="button" onClick={() => setSidebarCollapsed(false)}>
+            Abrir panel
+          </button>
+        )}
         <header className="topbar">
           <div>
             <h2>{view === 'mapa' ? 'Mapa operacional' : 'Estadísticas del campus'}</h2>
@@ -964,9 +967,15 @@ function App({ onLogout, session }) {
               <Search size={16} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar..." />
             </label>
+            {view === 'mapa' && (
+              <button className="ghost-btn" type="button" onClick={() => setMapFiltersOpen((value) => !value)}>
+                <Filter size={16} />
+                Filtros
+              </button>
+            )}
             <button className="ghost-btn" type="button" onClick={() => setAlertsDrawerOpen((value) => !value)}>
               <Bell size={16} />
-              Alertas
+              Incidencias
             </button>
             {onLogout && <button className="ghost-btn" type="button" onClick={onLogout} title="Cerrar sesión">Cerrar sesión</button>}
           </div>
@@ -974,35 +983,10 @@ function App({ onLogout, session }) {
 
         {view === 'mapa' && (
           <section className="layout layout--map">
-            <div className="summary-grid">
-              <StatCard title="Incidentes visibles" value={summaryStats.total} detail={`Activos: ${summaryStats.active} · Asignados: ${summaryStats.assigned}`} tone="accent" />
-              <StatCard title="Respuesta media" value={stats.avgResponse} detail="Según el filtro activo" />
-              <StatCard title="Casos cerrados" value={summaryStats.closed} detail="Historial filtrado" />
-              <StatCard title="Guardias en mapa" value={activeGuards.length} detail="Ubicación reportada en vivo" tone="soft" />
-            </div>
-
-            <div className="content-grid">
-              <section className="panel panel--map">
-                <div className="panel__header">
-                  <div>
-                    <h3>Mapa del campus</h3>
-                    <p>Polígonos, incidencias activas y guardias en tiempo real</p>
-                  </div>
-                  <div className="legend">
-                    {zones.map((zone) => (
-                      <span key={zone.id}><i style={{ background: zone.color }} /> {zone.label}</span>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" className="ghost-btn ghost-btn--small" onClick={() => {
-                      setActiveCoords(null);
-                      setMapResetKey((k) => k + 1);
-                    }}>Recentrar mapa</button>
-                  </div>
-                </div>
-
+            <div className="map-workspace">
+              <section className="panel panel--map panel--map-focus">
                 <div className="map-shell">
-                    <MapContainer center={[CAMPUS_CENTER.lat, CAMPUS_CENTER.lng]} zoom={DEFAULT_OPEN_ZOOM} className="map" {...MAP_OPTIONS}>
+                    <MapContainer center={[CAMPUS_CENTER.lat, CAMPUS_CENTER.lng]} zoom={DEFAULT_OPEN_ZOOM} maxZoom={20} className="map" {...MAP_OPTIONS}>
                     <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                       <RecenterMap resetKey={mapResetKey} />
                       {activeCoords && <FocusMap coords={activeCoords} />}
@@ -1048,17 +1032,24 @@ function App({ onLogout, session }) {
                 </div>
               </section>
 
-              <aside className="panel panel--side">
-                <div className="panel__header panel__header--stacked">
-                  <div>
-                    <h3>Filtros</h3>
-                    <p>Refina por zona, tipo y búsqueda</p>
-                  </div>
-                  <div className="filter-badge">
-                    <Filter size={14} /> Activos
-                  </div>
+              <div className="map-floating map-floating--legend">
+                <div className="legend">
+                  {zones.map((zone) => (
+                    <span key={zone.id}><i style={{ background: zone.color }} /> {zone.label}</span>
+                  ))}
                 </div>
+                <button type="button" className="ghost-btn ghost-btn--small" onClick={() => {
+                  setActiveCoords(null);
+                  setMapResetKey((k) => k + 1);
+                }}>Recentrar mapa</button>
+              </div>
 
+              {mapFiltersOpen && (
+                <div className="map-floating map-floating--filters">
+                  <div className="map-floating__header">
+                    <strong>Filtros</strong>
+                    <button type="button" onClick={() => setMapFiltersOpen(false)}>Cerrar</button>
+                  </div>
                 <div className="filters">
                   <label>
                     Zona
@@ -1082,10 +1073,13 @@ function App({ onLogout, session }) {
                     </select>
                   </label>
                 </div>
+                </div>
+              )}
 
+              <div className="map-floating map-floating--guards">
                 <div className="guard-list">
                   <div className="incident-list__header">
-                    <h3>Guardias en ruta</h3>
+                    <h3>Guardias activos</h3>
                     <span>{activeGuards.length}</span>
                   </div>
                   {activeGuards.map((guard) => (
@@ -1100,14 +1094,21 @@ function App({ onLogout, session }) {
                   ))}
                   {activeGuards.length === 0 && <p className="empty-state">Aún no hay guardias reportando ubicación.</p>}
                 </div>
+              </div>
 
-                <div className="incident-list">
+              {alertsDrawerOpen && (
+                <div className="map-floating map-floating--incidents">
+                  <div className="map-floating__header">
+                    <strong>Incidencias</strong>
+                    <button type="button" onClick={() => setAlertsDrawerOpen(false)}>Cerrar</button>
+                  </div>
+                <div className="incident-list incident-list--floating">
                   <div className="incident-list__header">
-                    <h3>Incidencias recientes</h3>
+                    <h3>Recientes</h3>
                     <span>{filteredAlerts.length}</span>
                   </div>
 
-                  {filteredAlerts.map((alert) => (
+                  {filteredAlerts.slice(0, 12).map((alert) => (
                     <article key={alert.id} className="incident-card" onClick={() => focusAlert(alert)}>
                       <div className="incident-card__top">
                         <span className="incident-card__tag">
@@ -1134,7 +1135,8 @@ function App({ onLogout, session }) {
                   {loadingIncidents && <p className="empty-state">Cargando incidencias reales...</p>}
                   {!loadingIncidents && filteredAlerts.length === 0 && <p className="empty-state">No hay incidencias que coincidan con los filtros.</p>}
                 </div>
-              </aside>
+                </div>
+              )}
             </div>
           </section>
         )
@@ -1201,7 +1203,7 @@ function App({ onLogout, session }) {
           <section className="layout layout--stats">
             <div className="summary-grid">
               <StatCard title="Total incidentes" value={statsAlerts.length} detail={statsScope === 'active' ? 'Solo casos abiertos' : 'Incluye cerrados y asignados'} tone="accent" />
-              <StatCard title="Casos activos" value={statsAlerts.filter((item) => item.status === 'Activo').length} detail="Siguen abiertos" />
+              <StatCard title="Respuesta media" value={stats.avgResponse} detail="Según el rango seleccionado" />
               <StatCard title="Casos cerrados" value={statsAlerts.filter((item) => item.status === 'Cerrado').length} detail="Con seguimiento completo" />
               <StatCard title="Guardias en línea" value={activeGuards.length} detail="Reportando ubicación en vivo" tone="soft" />
             </div>
@@ -1386,7 +1388,7 @@ function App({ onLogout, session }) {
           </div>
         )}
 
-        {alertsDrawerOpen && (
+        {alertsDrawerOpen && view !== 'mapa' && (
           <aside className="alerts-drawer">
             <div className="alerts-drawer__header">
               <div>
