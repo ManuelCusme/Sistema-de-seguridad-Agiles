@@ -4,6 +4,7 @@ import App from '../App';
 import * as Notifications from 'expo-notifications';
 import axios from 'axios';
 import MockAdapter from 'axios-mock-adapter';
+import { API_URL } from '../config/network';
 
 // Mock dependencias
 jest.mock('expo-notifications', () => ({
@@ -56,6 +57,7 @@ const mockAxios = new MockAdapter(axios);
 describe('Flujo de Notificaciones Push - Guardia', () => {
   beforeEach(() => {
     mockAxios.reset();
+    mockAxios.onPost(`${API_URL}/notifications/register-token`).reply(200);
   });
 
   test('✅ Test_PermisosNotificacionSolicitados - Verificar que al montar la app se solicitan permisos de notificación', async () => {
@@ -67,8 +69,6 @@ describe('Flujo de Notificaciones Push - Guardia', () => {
   });
 
   test('✅ Test_TokenRegistradoEnBackend - Verificar que el pushToken se envía correctamente al backend', async () => {
-    mockAxios.onPost('http://localhost:5000/api/notifications/register-token').reply(200);
-
     render(<App />);
 
     await waitFor(() => {

@@ -12,6 +12,7 @@ import HomeScreen from './screens/HomeScreen';
 import GuardScreen from './screens/GuardScreen';
 import DetalleIncidenteScreen from './screens/DetalleIncidenteScreen';
 import { AuthProvider } from './context/AuthContext';
+import { API_URL } from './config/network';
 
 const Stack = createStackNavigator();
 
@@ -54,7 +55,7 @@ export default function App() {
 
         const token = await registerForPushNotificationsAsync(Notifications, Device);
         if (token) {
-          axios.post('http://localhost:5000/api/notifications/register-token', { token })
+          axios.post(`${API_URL}/notifications/register-token`, { token })
             .then(() => console.log('Push Token registrado en backend:', token))
             .catch(err => console.error('Error registrando token', err));
         }
