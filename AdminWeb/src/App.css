@@ -654,6 +654,14 @@ button {
   transform: translateY(-2px);
 }
 
+.incident-marker--recent .incident-marker__chip {
+  box-shadow:
+    0 0 0 8px rgba(239, 68, 68, 0.18),
+    0 0 0 18px rgba(239, 68, 68, 0.08),
+    0 10px 24px rgba(239, 68, 68, 0.34);
+  animation: recentIncidentPulse 1.2s ease-in-out infinite;
+}
+
 .incident-marker__glyph {
   font-size: 15px;
   line-height: 1;
@@ -1028,6 +1036,21 @@ button {
   background: linear-gradient(180deg, rgba(77, 130, 255, 0.12), rgba(255, 255, 255, 0.96));
 }
 
+.incident-card--recent {
+  border-color: rgba(239, 68, 68, 0.58);
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.12),
+    0 18px 34px rgba(239, 68, 68, 0.14);
+  background:
+    linear-gradient(180deg, rgba(239, 68, 68, 0.1), rgba(255, 255, 255, 0.97));
+}
+
+.incident-card--recent .incident-card__tag,
+.incident-card--recent .incident-card__status--activo {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
 .incident-card__top {
   display: flex;
   align-items: center;
@@ -1106,6 +1129,17 @@ button {
   display: block;
   margin-top: 10px;
   color: var(--muted);
+}
+
+@keyframes recentIncidentPulse {
+  0%,
+  100% {
+    transform: translateY(-2px) scale(1);
+  }
+
+  50% {
+    transform: translateY(-2px) scale(1.08);
+  }
 }
 
 .empty-state {

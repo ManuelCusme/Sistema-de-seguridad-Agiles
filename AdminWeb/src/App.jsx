@@ -170,6 +170,9 @@ const motiveColors = {
   INCENDIO: '#ef4444',
 };
 
+const RECENT_INCIDENT_HIGHLIGHT_MS = 15000;
+const RECENT_INCIDENT_COLOR = '#ef4444';
+
 const motiveGlyphs = {
   ROBO: '🦹',
   AGRESIÓN: '🛡️',
@@ -179,14 +182,14 @@ const motiveGlyphs = {
   INCENDIO: '🔥',
 };
 
-const createMarkerIcon = (motive, status) => {
+const createMarkerIcon = (motive, status, isRecent = false) => {
   const normalized = String(motive || 'EMERGENCIA').toUpperCase();
   const isAssigned = normalizeStatus(status) === 'Asignado';
-  const color = isAssigned ? '#4d82ff' : (motiveColors[normalized] || '#4d82ff');
+  const color = isRecent ? RECENT_INCIDENT_COLOR : (isAssigned ? '#4d82ff' : (motiveColors[normalized] || '#4d82ff'));
   const glyph = motiveGlyphs[normalized] || '📍';
 
   return L.divIcon({
-    className: 'incident-marker',
+    className: `incident-marker ${isRecent ? 'incident-marker--recent' : ''}`,
     html: `
       <span class="incident-marker__chip" style="background:${color}22;color:${color}">
         <span class="incident-marker__glyph">${glyph}</span>
@@ -506,6 +509,8 @@ function App({ onLogout, session }) {
   const [toast, setToast] = useState(null);
   const [userLookup, setUserLookup] = useState({});
   const [guardLocations, setGuardLocations] = useState({});
+  const [recentIncidentIds, setRecentIncidentIds] = useState({});
+  const recentIncidentTimersRef = useRef({});
 
   const showToast = (message, tone = 'success') => {
     setToast({ message, tone });
@@ -608,6 +613,22 @@ function App({ onLogout, session }) {
     setAlertsDrawerOpen(false);
   };
 
+  const markIncidentAsRecent = (incidentId) => {
+    if (!incidentId) return;
+
+    window.clearTimeout(recentIncidentTimersRef.current[incidentId]);
+    setRecentIncidentIds((prev) => ({ ...prev, [incidentId]: true }));
+
+    recentIncidentTimersRef.current[incidentId] = window.setTimeout(() => {
+      setRecentIncidentIds((prev) => {
+        const next = { ...prev };
+        delete next[incidentId];
+        return next;
+      });
+      delete recentIncidentTimersRef.current[incidentId];
+    }, RECENT_INCIDENT_HIGHLIGHT_MS);
+  };
+
   useEffect(() => {
     const loadUsers = async () => {
       try {
@@ -695,6 +716,10 @@ function App({ onLogout, session }) {
       };
 
       setAlerts((prev) => [nextIncident, ...prev]);
+      markIncidentAsRecent(nextIncident.id);
+      setView('mapa');
+      setAlertsDrawerOpen(true);
+      setActiveCoords(nextIncident.pos);
 
       if (audioRef.current) {
         audioRef.current.play().catch(() => {});
@@ -750,7 +775,10 @@ function App({ onLogout, session }) {
       .then(() => setConnected(true))
       .catch(() => setConnected(false));
 
-    return () => connection.stop();
+    return () => {
+      Object.values(recentIncidentTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+      connection.stop();
+    };
   }, []);
 
   const activeGuards = useMemo(() => Object.values(guardLocations), [guardLocations]);
@@ -1010,20 +1038,24 @@ function App({ onLogout, session }) {
                       </Polygon>
                     ))}
 
-                    {filteredAlerts.map((alert) => (
-                      <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]} icon={createMarkerIcon(alert.motivo, alert.status)}>
-                        <Popup>
-                          <div className="popup-card">
-                            <div className="popup-card__header">
-                              <IncidentIcon motive={alert.motivo} />
-                              <strong>{alert.motivo}</strong>
+                    {filteredAlerts.map((alert) => {
+                      const isRecent = Boolean(recentIncidentIds[alert.id]);
+
+                      return (
+                        <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]} icon={createMarkerIcon(alert.motivo, alert.status, isRecent)}>
+                          <Popup>
+                            <div className="popup-card">
+                              <div className="popup-card__header">
+                                <IncidentIcon motive={alert.motivo} />
+                                <strong>{alert.motivo}</strong>
+                              </div>
+                              <p>{alert.user}</p>
+                              <span>{alert.zone}</span>
                             </div>
-                            <p>{alert.user}</p>
-                            <span>{alert.zone}</span>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    ))}
+                          </Popup>
+                        </Marker>
+                      );
+                    })}
 
                     {activeGuards.map((guard) => (
                       <Marker key={guard.id} position={[guard.pos.lat, guard.pos.lng]} icon={createGuardMarkerIcon(guard.name)}>
@@ -1129,7 +1161,7 @@ function App({ onLogout, session }) {
                   </div>
 
                   {filteredAlerts.slice(0, 12).map((alert) => (
-                    <article key={alert.id} className={`incident-card ${alert.status === 'Asignado' ? 'incident-card--assigned' : ''}`} onClick={() => focusAlert(alert)}>
+                    <article key={alert.id} className={`incident-card ${alert.status === 'Asignado' ? 'incident-card--assigned' : ''} ${recentIncidentIds[alert.id] ? 'incident-card--recent' : ''}`} onClick={() => focusAlert(alert)}>
                       <div className="incident-card__top">
                         <span className="incident-card__tag">
                           <IncidentIcon motive={alert.motivo} />
