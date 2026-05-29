@@ -526,6 +526,36 @@ button {
   line-height: 1;
 }
 
+.guard-marker {
+  background: transparent;
+  border: 0;
+}
+
+.guard-marker__chip {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #0b3354;
+  color: #fff;
+  border: 3px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.25);
+  font-weight: 900;
+}
+
+.guard-popup-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #0b3354;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
 .incident-icon {
   display: inline-grid;
   place-items: center;
@@ -709,6 +739,49 @@ button {
   max-height: calc(100vh - 300px);
   overflow-y: auto;
   padding-right: 8px;
+}
+
+.guard-list {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.guard-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #fff, #fbfcfe);
+}
+
+.guard-card__avatar {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #0b3354;
+  color: #fff;
+  font-weight: 900;
+  flex: 0 0 auto;
+}
+
+.guard-card strong {
+  display: block;
+  font-size: 0.94rem;
+}
+
+.guard-card p,
+.guard-card small {
+  display: block;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .incident-list__header {

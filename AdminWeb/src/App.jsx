@@ -196,6 +196,17 @@ const createMarkerIcon = (motive) => {
   });
 };
 
+const createGuardMarkerIcon = (guardName) => {
+  const initial = String(guardName || 'G').trim().charAt(0).toUpperCase() || 'G';
+
+  return L.divIcon({
+    className: 'guard-marker',
+    html: `<span class="guard-marker__chip">${initial}</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
+};
+
 const normalizeStatus = (status) => {
   const value = String(status || 'Activo').toUpperCase();
 
@@ -490,6 +501,7 @@ function App({ onLogout, session }) {
   const [closeModalVisible, setCloseModalVisible] = useState(false);
   const [toast, setToast] = useState(null);
   const [userLookup, setUserLookup] = useState({});
+  const [guardLocations, setGuardLocations] = useState({});
 
   const showToast = (message, tone = 'success') => {
     setToast({ message, tone });
@@ -631,6 +643,8 @@ function App({ onLogout, session }) {
           time: formatRelativeTime(item.incFechaReporte),
           timestamp: parseBackendDate(item.incFechaReporte) || new Date(),
           pos: { lat: item.incLatitud, lng: item.incLongitud },
+          assignedBy: item.incAsignadoPor || null,
+          assignedAt: parseBackendDate(item.incAsignadoEn),
           closedBy: item.incCerradoPor || null,
           closedAt: parseBackendDate(item.incCerradoEn),
           observation: item.incObservacion || '',
@@ -671,6 +685,8 @@ function App({ onLogout, session }) {
         pos: { lat: incident.incLatitud, lng: incident.incLongitud },
         closedBy: null,
         closedAt: null,
+        assignedBy: null,
+        assignedAt: null,
         observation: '',
       };
 
@@ -692,10 +708,37 @@ function App({ onLogout, session }) {
           ...item,
           status: nextStatus,
           zone: normalizeZoneLabel(incident.incZona || item.zone, incident.incGeocercaNombre || item.zone),
-          closedBy: incident.incCerradoPor || item.closedBy || incident.incAsignadoPor || null,
+          assignedBy: incident.incAsignadoPor || item.assignedBy || null,
+          assignedAt: parseBackendDate(incident.incAsignadoEn) || item.assignedAt,
+          closedBy: incident.incCerradoPor || item.closedBy || null,
           closedAt: parseBackendDate(incident.incCerradoEn) || item.closedAt,
           observation: incident.incObservacion || item.observation,
         };
+      }));
+    });
+
+    connection.on('ReceiveGuardLocation', (location) => {
+      const guardId = String(location?.guardId || location?.GuardId || '').trim();
+      const latitude = Number(location?.latitude ?? location?.Latitude);
+      const longitude = Number(location?.longitude ?? location?.Longitude);
+
+      if (!guardId || Number.isNaN(latitude) || Number.isNaN(longitude)) {
+        return;
+      }
+
+      const incidentId = location?.incidentId ?? location?.IncidentId ?? null;
+
+      setGuardLocations((prev) => ({
+        ...prev,
+        [guardId.toLowerCase()]: {
+          id: guardId,
+          name: location?.guardName || location?.GuardName || guardId || 'Guardia',
+          pos: { lat: latitude, lng: longitude },
+          incidentId,
+          incidentStatus: location?.incidentStatus || location?.IncidentStatus || null,
+          incidentMotivo: location?.incidentMotivo || location?.IncidentMotivo || null,
+          updatedAt: parseBackendDate(location?.updatedAt || location?.UpdatedAt) || new Date(),
+        },
       }));
     });
 
@@ -705,6 +748,8 @@ function App({ onLogout, session }) {
 
     return () => connection.stop();
   }, []);
+
+  const activeGuards = useMemo(() => Object.values(guardLocations), [guardLocations]);
 
   const rangeFilteredAlerts = useMemo(() => {
     const limitMs = getRangeLimitMs(statsRange);
@@ -933,7 +978,7 @@ function App({ onLogout, session }) {
               <StatCard title="Incidentes visibles" value={summaryStats.total} detail={`Activos: ${summaryStats.active} · Asignados: ${summaryStats.assigned}`} tone="accent" />
               <StatCard title="Respuesta media" value={stats.avgResponse} detail="Según el filtro activo" />
               <StatCard title="Casos cerrados" value={summaryStats.closed} detail="Historial filtrado" />
-              <StatCard title="Zonas vigiladas" value="4" detail="Campus Huachi" tone="soft" />
+              <StatCard title="Guardias en mapa" value={activeGuards.length} detail="Ubicación reportada en vivo" tone="soft" />
             </div>
 
             <div className="content-grid">
@@ -941,7 +986,7 @@ function App({ onLogout, session }) {
                 <div className="panel__header">
                   <div>
                     <h3>Mapa del campus</h3>
-                    <p>Polígonos, zonas y marcador de incidentes activos</p>
+                    <p>Polígonos, incidencias activas y guardias en tiempo real</p>
                   </div>
                   <div className="legend">
                     {zones.map((zone) => (
@@ -980,6 +1025,21 @@ function App({ onLogout, session }) {
                             </div>
                             <p>{alert.user}</p>
                             <span>{alert.zone}</span>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+
+                    {activeGuards.map((guard) => (
+                      <Marker key={guard.id} position={[guard.pos.lat, guard.pos.lng]} icon={createGuardMarkerIcon(guard.name)}>
+                        <Popup>
+                          <div className="popup-card">
+                            <div className="popup-card__header">
+                              <span className="guard-popup-icon">G</span>
+                              <strong>{guard.name}</strong>
+                            </div>
+                            <p>Incidencia activa: {guard.incidentId || 'Sin asignación reportada'}</p>
+                            <span>{guard.incidentMotivo || guard.incidentStatus || 'Seguimiento en vivo'}</span>
                           </div>
                         </Popup>
                       </Marker>
@@ -1023,6 +1083,24 @@ function App({ onLogout, session }) {
                   </label>
                 </div>
 
+                <div className="guard-list">
+                  <div className="incident-list__header">
+                    <h3>Guardias en ruta</h3>
+                    <span>{activeGuards.length}</span>
+                  </div>
+                  {activeGuards.map((guard) => (
+                    <article key={guard.id} className="guard-card">
+                      <span className="guard-card__avatar">{guard.name.charAt(0).toUpperCase()}</span>
+                      <div>
+                        <strong>{guard.name}</strong>
+                        <p>{guard.incidentId ? `Atiende ${guard.incidentId}` : 'Disponible / sin incidencia activa'}</p>
+                        <small>{formatRelativeTime(guard.updatedAt)}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {activeGuards.length === 0 && <p className="empty-state">Aún no hay guardias reportando ubicación.</p>}
+                </div>
+
                 <div className="incident-list">
                   <div className="incident-list__header">
                     <h3>Incidencias recientes</h3>
@@ -1040,6 +1118,7 @@ function App({ onLogout, session }) {
                       </div>
                       <strong>{alert.user}</strong>
                       <p>{alert.faculty} · {alert.zone}</p>
+                      <p>Guardia asignado: {alert.assignedBy ? resolveUserName(alert.assignedBy) : 'Sin asignar'}</p>
                       <div className="incident-card__footer">
                         <small>{alert.time}</small>
                         <button type="button" className="incident-card__dismiss" onClick={(e) => {
@@ -1124,7 +1203,7 @@ function App({ onLogout, session }) {
               <StatCard title="Total incidentes" value={statsAlerts.length} detail={statsScope === 'active' ? 'Solo casos abiertos' : 'Incluye cerrados y asignados'} tone="accent" />
               <StatCard title="Casos activos" value={statsAlerts.filter((item) => item.status === 'Activo').length} detail="Siguen abiertos" />
               <StatCard title="Casos cerrados" value={statsAlerts.filter((item) => item.status === 'Cerrado').length} detail="Con seguimiento completo" />
-              <StatCard title="Guardias en línea" value="7" detail="Conectados al sistema" tone="soft" />
+              <StatCard title="Guardias en línea" value={activeGuards.length} detail="Reportando ubicación en vivo" tone="soft" />
             </div>
 
             <div className="stats-toolbar">
