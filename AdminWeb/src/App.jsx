@@ -179,9 +179,10 @@ const motiveGlyphs = {
   INCENDIO: '🔥',
 };
 
-const createMarkerIcon = (motive) => {
+const createMarkerIcon = (motive, status) => {
   const normalized = String(motive || 'EMERGENCIA').toUpperCase();
-  const color = motiveColors[normalized] || '#4d82ff';
+  const isAssigned = normalizeStatus(status) === 'Asignado';
+  const color = isAssigned ? '#4d82ff' : (motiveColors[normalized] || '#4d82ff');
   const glyph = motiveGlyphs[normalized] || '📍';
 
   return L.divIcon({
@@ -1010,7 +1011,7 @@ function App({ onLogout, session }) {
                     ))}
 
                     {filteredAlerts.map((alert) => (
-                      <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]} icon={createMarkerIcon(alert.motivo)}>
+                      <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]} icon={createMarkerIcon(alert.motivo, alert.status)}>
                         <Popup>
                           <div className="popup-card">
                             <div className="popup-card__header">
@@ -1128,7 +1129,7 @@ function App({ onLogout, session }) {
                   </div>
 
                   {filteredAlerts.slice(0, 12).map((alert) => (
-                    <article key={alert.id} className="incident-card" onClick={() => focusAlert(alert)}>
+                    <article key={alert.id} className={`incident-card ${alert.status === 'Asignado' ? 'incident-card--assigned' : ''}`} onClick={() => focusAlert(alert)}>
                       <div className="incident-card__top">
                         <span className="incident-card__tag">
                           <IncidentIcon motive={alert.motivo} />
@@ -1138,7 +1139,9 @@ function App({ onLogout, session }) {
                       </div>
                       <strong>{alert.user}</strong>
                       <p>{alert.faculty} · {alert.zone}</p>
-                      <p>Guardia asignado: {alert.assignedBy ? resolveUserName(alert.assignedBy) : 'Sin asignar'}</p>
+                      <p className={alert.assignedBy ? 'incident-card__assigned-guard' : ''}>
+                        Guardia asignado: {alert.assignedBy ? resolveUserName(alert.assignedBy) : 'Sin asignar'}
+                      </p>
                       <div className="incident-card__footer">
                         <small>{alert.time}</small>
                         <button type="button" className="incident-card__dismiss" onClick={(e) => {

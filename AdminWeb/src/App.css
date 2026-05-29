@@ -1023,6 +1023,11 @@ button {
   box-shadow: 0 16px 30px rgba(24, 36, 55, 0.08);
 }
 
+.incident-card--assigned {
+  border-color: rgba(77, 130, 255, 0.34);
+  background: linear-gradient(180deg, rgba(77, 130, 255, 0.12), rgba(255, 255, 255, 0.96));
+}
+
 .incident-card__top {
   display: flex;
   align-items: center;
@@ -1066,8 +1071,8 @@ button {
 }
 
 .incident-card__status--asignado {
-  background: rgba(247, 201, 72, 0.2);
-  color: #8d6800;
+  background: rgba(77, 130, 255, 0.14);
+  color: #2553c7;
 }
 
 .incident-card__status--cerrado {
@@ -1084,6 +1089,17 @@ button {
   margin: 6px 0 0;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.incident-card__assigned-guard {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(77, 130, 255, 0.12);
+  color: #2553c7 !important;
+  font-weight: 800;
 }
 
 .incident-card small {

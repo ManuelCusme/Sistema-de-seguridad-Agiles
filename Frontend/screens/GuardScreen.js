@@ -291,6 +291,22 @@ const GuardScreen = () => {
     };
   };
 
+  const publishGuardLocation = (location = currentLocation, incident = trackingIncidentRef.current) => {
+    if (!location || connectionRef.current?.state !== signalR.HubConnectionState.Connected) {
+      return;
+    }
+
+    connectionRef.current.invoke('UpdateGuardLocation', {
+      guardId: myUserId || user?.usuId || user?.id || user?.Nombre1 || 'guardia',
+      guardName: [user?.Nombre1, user?.Apellido1].filter(Boolean).join(' ') || user?.email || 'Guardia',
+      latitude: location.latitude,
+      longitude: location.longitude,
+      incidentId: incident?.id || null,
+      incidentStatus: incident?.status || null,
+      incidentMotivo: incident?.motivo || null,
+    }).catch(() => {});
+  };
+
   /**
    * SCRUM-15: Manejar la aceptación de un incidente
    * Al presionar "Aceptar", se marca el incidente como atendido (ASIGNADO)
@@ -314,12 +330,32 @@ const GuardScreen = () => {
 
       // Si es exitoso, cambiar el estado del incidente a ASIGNADO
       if (response.status === 200 && response.data.success) {
+        const assignedAlert = {
+          ...alert,
+          status: 'ASIGNADO',
+          assignedBy: myUserId || user?.Nombre1 || 'Guardia de turno',
+          assignedAt: new Date().toISOString(),
+        };
         setAlerts(prev => prev.map(a => 
           a.id === alert.id 
-            ? { ...a, status: 'ASIGNADO', assignedBy: myUserId || user?.Nombre1 || 'Guardia de turno', assignedAt: new Date().toISOString() }
+            ? assignedAlert
             : a
         ));
         setSelectedAlertId(alert.id);
+        if (currentLocation) {
+          publishGuardLocation(currentLocation, assignedAlert);
+        } else {
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
+            .then((position) => {
+              const immediateLocation = {
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+              };
+              setCurrentLocation(immediateLocation);
+              publishGuardLocation(immediateLocation, assignedAlert);
+            })
+            .catch(() => {});
+        }
         
         // Feedback visual: vibración corta de confirmación
         Vibration.vibrate(200);
@@ -552,8 +588,8 @@ const GuardScreen = () => {
         locationSubscription = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.High,
-            timeInterval: 4000,
-            distanceInterval: 3,
+            timeInterval: 1500,
+            distanceInterval: 1,
           },
           (position) => {
             const nextLocation = {
@@ -563,18 +599,7 @@ const GuardScreen = () => {
             const incident = trackingIncidentRef.current;
 
             setCurrentLocation(nextLocation);
-
-            if (connectionRef.current?.state === signalR.HubConnectionState.Connected) {
-              connectionRef.current.invoke('UpdateGuardLocation', {
-                guardId: myUserId || user?.usuId || user?.id || user?.Nombre1 || 'guardia',
-                guardName: [user?.Nombre1, user?.Apellido1].filter(Boolean).join(' ') || user?.email || 'Guardia',
-                latitude: nextLocation.latitude,
-                longitude: nextLocation.longitude,
-                incidentId: incident?.id || null,
-                incidentStatus: incident?.status || null,
-                incidentMotivo: incident?.motivo || null,
-              }).catch(() => {});
-            }
+            publishGuardLocation(nextLocation, incident);
           }
         );
       } catch (error) {
