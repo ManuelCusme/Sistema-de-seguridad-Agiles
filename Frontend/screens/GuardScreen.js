@@ -11,13 +11,15 @@ import {
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
-import MapView, { Marker, Polygon } from 'react-native-maps';
+import MapView, { Marker, Polygon, Polyline } from 'react-native-maps';
 import { Text, Title, Paragraph, Card, Surface, IconButton, Button } from 'react-native-paper';
 import * as signalR from '@microsoft/signalr';
+import * as Location from 'expo-location';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { getIncidentByValue } from '../constants/incidentCatalog';
+import { ALERTS_HUB_URL } from '../config/network';
 
 const CAMPUS_CENTER = {
   latitude: -1.2687,
@@ -102,6 +104,33 @@ const getZoneCentroid = (coords = []) => {
   };
 };
 
+const getIncidentRegion = (alert, currentLocation) => {
+  const destination = {
+    latitude: alert?.pos?.lat || CAMPUS_CENTER.latitude,
+    longitude: alert?.pos?.lng || CAMPUS_CENTER.longitude,
+  };
+
+  if (!currentLocation) {
+    return {
+      ...destination,
+      latitudeDelta: 0.0045,
+      longitudeDelta: 0.0045,
+    };
+  }
+
+  const minLat = Math.min(destination.latitude, currentLocation.latitude);
+  const maxLat = Math.max(destination.latitude, currentLocation.latitude);
+  const minLng = Math.min(destination.longitude, currentLocation.longitude);
+  const maxLng = Math.max(destination.longitude, currentLocation.longitude);
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: Math.max(0.0035, (maxLat - minLat) * 1.8),
+    longitudeDelta: Math.max(0.0035, (maxLng - minLng) * 1.8),
+  };
+};
+
 const GuardScreen = () => {
   const { logout, user, token, API_URL } = useAuth();
   const navigation = useNavigation();
@@ -113,9 +142,14 @@ const GuardScreen = () => {
   const [selectedAlert, setSelectedAlert] = useState(null); // Alert being closed
   const [closeObservation, setCloseObservation] = useState(''); // Observation text input
   const [selectedAlertId, setSelectedAlertId] = useState(null);
+  const [selectedMapAlert, setSelectedMapAlert] = useState(null);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [locationError, setLocationError] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('alertas');
   const mapRef = useRef(null);
+  const connectionRef = useRef(null);
+  const trackingIncidentRef = useRef(null);
   const myUserId = String(user?.id || user?.Id || '');
 
   const activeAlerts = alerts.filter((item) => item.status !== 'CERRADO');
@@ -124,6 +158,9 @@ const GuardScreen = () => {
     return String(item.assignedBy || '') === myUserId || String(item.closedBy || '') === myUserId;
   });
   const visibleAlerts = activeTab === 'historial' ? historyAlerts : activeAlerts;
+  const activeTrackingIncident = selectedMapAlert || activeAlerts.find((item) => item.status === 'ASIGNADO' && String(item.assignedBy || '') === myUserId) || null;
+
+  trackingIncidentRef.current = activeTrackingIncident;
 
   const handleLogout = () => {
     logout();
@@ -211,30 +248,21 @@ const GuardScreen = () => {
     setCloseModalVisible(true);
   };
 
-  const focusAlertOnMap = (alert) => {
-    if (!alert?.pos?.lat || !alert?.pos?.lng || !mapRef.current) {
+  const openIncidentMap = (alert) => {
+    if (!alert?.pos?.lat || !alert?.pos?.lng) {
       return;
     }
 
     setSelectedAlertId(alert.id);
-    mapRef.current.animateToRegion(
-      {
-        latitude: alert.pos.lat,
-        longitude: alert.pos.lng,
-        latitudeDelta: 0.0045,
-        longitudeDelta: 0.0045,
-      },
-      500
-    );
+    setSelectedMapAlert(alert);
   };
 
   const recenterMap = () => {
-    if (!mapRef.current) {
+    if (!mapRef.current || !selectedMapAlert) {
       return;
     }
 
-    setSelectedAlertId(null);
-    mapRef.current.animateToRegion(CAMPUS_CENTER, 500);
+    mapRef.current.animateToRegion(getIncidentRegion(selectedMapAlert, currentLocation), 500);
   };
 
   /**
@@ -349,9 +377,11 @@ const GuardScreen = () => {
     let shouldStopAfterStart = false;
 
     const newConnection = new signalR.HubConnectionBuilder()
-      .withUrl("http://192.168.0.5:5000/hubs/alerts")
+      .withUrl(ALERTS_HUB_URL)
       .withAutomaticReconnect()
       .build();
+
+    connectionRef.current = newConnection;
 
     newConnection.on("ReceiveAlert", (incidente) => {
       // El backend envía un objeto IncidentDto con campos: incLatitud, incLongitud,
@@ -384,6 +414,8 @@ const GuardScreen = () => {
         return {
           ...item,
           status: String(incident.incEstado || item.status || 'PENDIENTE').toUpperCase(),
+          assignedBy: incident.incAsignadoPor || item.assignedBy || null,
+          assignedAt: incident.incAsignadoEn || item.assignedAt || null,
           closedBy: incident.incCerradoPor || item.closedBy || null,
           closedAt: incident.incCerradoEn || item.closedAt || null,
           observation: incident.incObservacion || item.observation || '',
@@ -399,6 +431,7 @@ const GuardScreen = () => {
 
     return () => {
       shouldStopAfterStart = true;
+      connectionRef.current = null;
       newConnection.off("ReceiveAlert");
       startPromise.finally(() => {
         if (newConnection.state === signalR.HubConnectionState.Connected) {
@@ -408,6 +441,61 @@ const GuardScreen = () => {
     };
   }, []);
 
+  useEffect(() => {
+    let locationSubscription;
+    let mounted = true;
+
+    const startTracking = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          if (mounted) setLocationError('Permiso de ubicación no concedido');
+          return;
+        }
+
+        locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 4000,
+            distanceInterval: 3,
+          },
+          (position) => {
+            const nextLocation = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            };
+            const incident = trackingIncidentRef.current;
+
+            setCurrentLocation(nextLocation);
+
+            if (connectionRef.current?.state === signalR.HubConnectionState.Connected) {
+              connectionRef.current.invoke('UpdateGuardLocation', {
+                guardId: myUserId || user?.usuId || user?.id || user?.Nombre1 || 'guardia',
+                guardName: [user?.Nombre1, user?.Apellido1].filter(Boolean).join(' ') || user?.email || 'Guardia',
+                latitude: nextLocation.latitude,
+                longitude: nextLocation.longitude,
+                incidentId: incident?.id || null,
+                incidentStatus: incident?.status || null,
+                incidentMotivo: incident?.motivo || null,
+              }).catch(() => {});
+            }
+          }
+        );
+      } catch (error) {
+        if (mounted) setLocationError(error?.message || 'No se pudo iniciar el seguimiento GPS');
+      }
+    };
+
+    startTracking();
+
+    return () => {
+      mounted = false;
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
+  }, [myUserId, user?.Apellido1, user?.Nombre1, user?.email, user?.id, user?.usuId]);
+
   /**
    * Renderizar botones según el estado del incidente
    */
@@ -416,60 +504,151 @@ const GuardScreen = () => {
       return null;
     }
 
+    const mapButton = (
+      <Button
+        mode="outlined"
+        textColor="#2f6bff"
+        onPress={() => openIncidentMap(alert)}
+        icon="map-marker"
+        style={styles.locationButton}
+        labelStyle={styles.locationButtonLabel}
+      >
+        Ver ubicación
+      </Button>
+    );
+
     if (alert.status === 'PENDIENTE') {
       return (
-        <Button
-          mode="contained"
-          buttonColor="#FFFFFF"
-          textColor="#1B5E20"
-          onPress={() => handleAcceptIncident(alert)}
-          disabled={loadingIncidents[alert.id]}
-          icon={loadingIncidents[alert.id] ? null : "check"}
-          style={styles.acceptButton}
-          labelStyle={styles.acceptButtonLabel}
-        >
-          {loadingIncidents[alert.id] ? (
-            <View style={styles.buttonBusyRow}>
-              <ActivityIndicator 
-                size="small" 
-                color="#1B5E20" 
-                style={{marginRight: 8}}
-              />
-              <Text style={styles.buttonBusyTextGreen}>Aceptando...</Text>
-            </View>
-          ) : (
-            'Aceptar'
-          )}
-        </Button>
+        <>
+          <Button
+            mode="contained"
+            buttonColor="#FFFFFF"
+            textColor="#1B5E20"
+            onPress={() => handleAcceptIncident(alert)}
+            disabled={loadingIncidents[alert.id]}
+            icon={loadingIncidents[alert.id] ? null : "check"}
+            style={styles.acceptButton}
+            labelStyle={styles.acceptButtonLabel}
+          >
+            {loadingIncidents[alert.id] ? (
+              <View style={styles.buttonBusyRow}>
+                <ActivityIndicator 
+                  size="small" 
+                  color="#1B5E20" 
+                  style={{marginRight: 8}}
+                />
+                <Text style={styles.buttonBusyTextGreen}>Aceptando...</Text>
+              </View>
+            ) : (
+              'Asumir caso'
+            )}
+          </Button>
+          {mapButton}
+        </>
       );
     } else if (alert.status === 'ASIGNADO') {
       return (
-        <Button
-          mode="contained"
-          buttonColor="#9E9E9E"
-          textColor="#FFFFFF"
-          onPress={() => handleOpenCloseModal(alert)}
-          disabled={closingIncidents[alert.id]}
-          icon={closingIncidents[alert.id] ? null : "close"}
-          style={styles.closeButton}
-          labelStyle={styles.closeButtonLabel}
-        >
-          {closingIncidents[alert.id] ? (
-            <View style={styles.buttonBusyRow}>
-              <ActivityIndicator 
-                size="small" 
-                color="#FFFFFF" 
-                style={{marginRight: 8}}
-              />
-              <Text style={styles.buttonBusyTextWhite}>Cerrando...</Text>
-            </View>
-          ) : (
-            'Cerrar Caso'
-          )}
-        </Button>
+        <>
+          <Button
+            mode="contained"
+            buttonColor="#9E9E9E"
+            textColor="#FFFFFF"
+            onPress={() => handleOpenCloseModal(alert)}
+            disabled={closingIncidents[alert.id]}
+            icon={closingIncidents[alert.id] ? null : "close"}
+            style={styles.closeButton}
+            labelStyle={styles.closeButtonLabel}
+          >
+            {closingIncidents[alert.id] ? (
+              <View style={styles.buttonBusyRow}>
+                <ActivityIndicator 
+                  size="small" 
+                  color="#FFFFFF" 
+                  style={{marginRight: 8}}
+                />
+                <Text style={styles.buttonBusyTextWhite}>Cerrando...</Text>
+              </View>
+            ) : (
+              'Cerrar caso'
+            )}
+          </Button>
+          {mapButton}
+        </>
       );
     }
+
+    return mapButton;
   };
+
+  if (selectedMapAlert) {
+    const destination = {
+      latitude: selectedMapAlert.pos.lat,
+      longitude: selectedMapAlert.pos.lng,
+    };
+    const routePoints = currentLocation ? [currentLocation, destination] : [];
+
+    return (
+      <View style={styles.mapScreen}>
+        <Surface style={styles.mapScreenHeader}>
+          <IconButton icon="arrow-left" iconColor="white" onPress={() => setSelectedMapAlert(null)} />
+          <View style={styles.mapScreenTitleBlock}>
+            <Text style={styles.mapScreenKicker}>UBICACIÓN DE INCIDENCIA</Text>
+            <Title style={styles.mapScreenTitle}>{selectedMapAlert.motivo}</Title>
+            <Text style={styles.mapScreenSubtitle}>{selectedMapAlert.zone} · {selectedMapAlert.time}</Text>
+          </View>
+        </Surface>
+
+        <MapView
+          ref={mapRef}
+          style={styles.fullMap}
+          initialRegion={getIncidentRegion(selectedMapAlert, currentLocation)}
+          onMapReady={recenterMap}
+          showsUserLocation
+          followsUserLocation
+          zoomEnabled
+          scrollEnabled
+          rotateEnabled
+          pitchEnabled
+          toolbarEnabled
+        >
+          {ZONES.map(z => (
+            <Polygon
+              key={z.id}
+              coordinates={z.coords}
+              fillColor={z.color}
+              strokeColor="rgba(0,0,0,0.1)"
+              strokeWidth={1}
+            />
+          ))}
+
+          {routePoints.length === 2 && (
+            <Polyline coordinates={routePoints} strokeColor="#2f6bff" strokeWidth={4} />
+          )}
+
+          {currentLocation && (
+            <Marker coordinate={currentLocation} title="Tu ubicación">
+              <View style={styles.guardMarker}>
+                <Text style={styles.guardMarkerText}>G</Text>
+              </View>
+            </Marker>
+          )}
+
+          <Marker coordinate={destination} title={selectedMapAlert.motivo} description={selectedMapAlert.zone}>
+            <View style={styles.destinationMarker}>
+              <Text style={styles.incidentEmojiText}>{selectedMapAlert.emoji || '🚨'}</Text>
+            </View>
+          </Marker>
+        </MapView>
+
+        <Surface style={styles.mapStatusPanel}>
+          <Text style={styles.sectionKicker}>SEGUIMIENTO</Text>
+          <Text style={styles.mapStatusTitle}>{currentLocation ? 'Ubicación del guardia activa' : 'Esperando GPS del guardia'}</Text>
+          <Text style={styles.mapStatusText}>{locationError || 'El administrador recibirá tu ubicación mientras te desplazas hacia la incidencia.'}</Text>
+          <Button mode="contained" buttonColor="#0b3354" onPress={recenterMap} style={styles.mapStatusButton}>Centrar recorrido</Button>
+        </Surface>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -516,8 +695,8 @@ const GuardScreen = () => {
               <>
                 <Surface style={styles.heroCard}>
                   <Text style={styles.heroKicker}>{activeTab === 'historial' ? 'HISTORIAL OPERATIVO' : 'CENTRO DE ALERTAS'}</Text>
-                  <Text style={styles.heroTitle}>{activeTab === 'historial' ? 'Casos atendidos por ti' : 'Alertas y zonas en tiempo real'}</Text>
-                  <Text style={styles.heroSubtitle}>{activeTab === 'historial' ? 'Revisa los incidentes que asumiste o cerraste desde el menú lateral.' : 'Revisa alertas activas, asume casos y navega directamente al punto del incidente.'}</Text>
+                  <Text style={styles.heroTitle}>{activeTab === 'historial' ? 'Casos atendidos por ti' : 'Incidencias asignadas y activas'}</Text>
+                  <Text style={styles.heroSubtitle}>{activeTab === 'historial' ? 'Revisa los incidentes que asumiste o cerraste desde el menú lateral.' : 'Primero revisa la lista. Abre el mapa solo cuando necesites navegar a una incidencia.'}</Text>
 
                   <View style={styles.badgeRow}>
                     <View style={styles.infoBadge}><Text style={styles.infoBadgeText}>📡 En vivo</Text></View>
@@ -525,65 +704,6 @@ const GuardScreen = () => {
                     <View style={styles.infoBadge}><Text style={styles.infoBadgeText}>🛡️ Turno {isOnDuty ? 'activo' : 'pausado'}</Text></View>
                   </View>
                 </Surface>
-
-                {activeTab === 'alertas' && (
-                  <Surface style={styles.mapCard}>
-                    <View style={styles.mapCardHeader}>
-                      <View>
-                        <Text style={styles.sectionKicker}>MAPA TÁCTICO</Text>
-                        <Text style={styles.sectionTitle}>Zonas y punto seleccionado</Text>
-                      </View>
-                    </View>
-
-                    <MapView
-                      ref={mapRef}
-                      style={styles.map}
-                      initialRegion={{
-                        ...CAMPUS_CENTER,
-                      }}
-                      onMapReady={recenterMap}
-                      zoomEnabled
-                      scrollEnabled={false}
-                      rotateEnabled={false}
-                      pitchEnabled={false}
-                      toolbarEnabled={false}
-                    >
-                      {ZONES.map(z => (
-                        <React.Fragment key={z.id}>
-                          <Polygon 
-                            coordinates={z.coords}
-                            fillColor={z.color}
-                            strokeColor="rgba(0,0,0,0.1)"
-                            strokeWidth={1}
-                          />
-                          <Marker coordinate={getZoneCentroid(z.coords)} anchor={{ x: 0.5, y: 0.5 }}>
-                            <View style={styles.zoneLabelBubble}>
-                              <Text style={styles.zoneLabelText}>{z.name}</Text>
-                            </View>
-                          </Marker>
-                        </React.Fragment>
-                      ))}
-
-                      {activeAlerts.map(alert => (
-                        <Marker
-                          key={alert.id}
-                          coordinate={{ latitude: alert.pos.lat, longitude: alert.pos.lng }}
-                          title={alert.user}
-                          description={`${alert.motivo} - ${alert.zone}`}
-                          anchor={{ x: 0.5, y: 0.5 }}
-                        >
-                          <View style={[styles.incidentEmojiBubble, alert.status === 'ASIGNADO' && styles.incidentEmojiBubbleAssigned]}>
-                            <Text style={styles.incidentEmojiText}>{alert.emoji || '🚨'}</Text>
-                          </View>
-                        </Marker>
-                      ))}
-                    </MapView>
-
-                    <View style={styles.mapFooter}>
-                      <Button mode="outlined" textColor="#2f6bff" style={styles.mapAction} onPress={recenterMap}>Centrar mapa</Button>
-                    </View>
-                  </Surface>
-                )}
 
                 <View style={styles.sectionBlock}>
                   <Text style={styles.sectionKicker}>{activeTab === 'historial' ? 'HISTORIAL' : 'ALERTAS RECIENTES'}</Text>
@@ -612,7 +732,7 @@ const GuardScreen = () => {
         ListEmptyComponent={activeTab === 'perfil' ? null : <Text style={styles.emptyText}>{activeTab === 'historial' ? 'No hay acciones tuyas en el historial' : 'No hay alertas activas'}</Text>}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
-          <TouchableOpacity activeOpacity={0.9} onPress={() => focusAlertOnMap(item)}>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => openIncidentMap(item)}>
             <Card style={[
               styles.card,
               item.status === 'ASIGNADO' && styles.cardAsignado,
@@ -627,7 +747,7 @@ const GuardScreen = () => {
                     <Text style={styles.statusBadge(item.status)}>{item.status}</Text>
                   </View>
                   <Paragraph style={styles.cardMeta}>{item.facultad} • {item.zone}</Paragraph>
-                  <Paragraph style={styles.cardZone}>Zona: {item.zone}</Paragraph>
+                  <Paragraph style={styles.cardZone}>Referencia: {item.geofence || item.zone}</Paragraph>
                   <Paragraph style={styles.cardTime}>{item.time}</Paragraph>
                   {!!item.observation && activeTab === 'historial' && <Paragraph style={styles.cardObservation}>Observación: {item.observation}</Paragraph>}
                 </View>
@@ -915,6 +1035,98 @@ const styles = StyleSheet.create({
   map: {
     height: 260,
   },
+  mapScreen: {
+    flex: 1,
+    backgroundColor: '#f3f6fb',
+  },
+  mapScreenHeader: {
+    paddingTop: 50,
+    paddingBottom: 14,
+    paddingHorizontal: 12,
+    backgroundColor: '#0b3354',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    elevation: 8,
+  },
+  mapScreenTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mapScreenKicker: {
+    fontSize: 10,
+    letterSpacing: 1,
+    color: 'rgba(255,255,255,0.7)',
+    fontWeight: '800',
+  },
+  mapScreenTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  mapScreenSubtitle: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  fullMap: {
+    flex: 1,
+  },
+  mapStatusPanel: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 18,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(77,130,255,0.14)',
+    elevation: 6,
+  },
+  mapStatusTitle: {
+    marginTop: 2,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0c1726',
+  },
+  mapStatusText: {
+    marginTop: 3,
+    color: '#64748b',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  mapStatusButton: {
+    marginTop: 10,
+    borderRadius: 12,
+  },
+  guardMarker: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#2f6bff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    elevation: 4,
+  },
+  guardMarkerText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  destinationMarker: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.98)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#D32F2F',
+    elevation: 5,
+  },
   mapFooter: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1080,7 +1292,9 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#E0E0E0',
-    justifyContent: 'flex-end'
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   acceptButton: {
     borderRadius: 8,
@@ -1103,6 +1317,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 0.5
+  },
+  locationButton: {
+    borderRadius: 8,
+    minHeight: 40,
+    justifyContent: 'center',
+    borderColor: '#2f6bff',
+  },
+  locationButtonLabel: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   buttonBusyRow: {
     flexDirection: 'row',
