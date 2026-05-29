@@ -28,6 +28,15 @@
       ]
     },
     {
+      "UpstreamPathTemplate": "/api/notifications/{everything}",
+      "UpstreamMethods": [ "Get", "Post", "Delete", "Options" ],
+      "DownstreamPathTemplate": "/api/notifications/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5003 }
+      ]
+    },
+    {
       "UpstreamPathTemplate": "/api/zones/{everything}",
       "UpstreamMethods": [ "Get", "Options" ],
       "DownstreamPathTemplate": "/api/zones/{everything}",

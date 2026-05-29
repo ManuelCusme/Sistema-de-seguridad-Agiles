@@ -3,6 +3,21 @@ import { ScrollView, StyleSheet, KeyboardAvoidingView, Platform } from 'react-na
 import { TextInput, Button, Text, Surface, HelperText } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 
+const inputTheme = {
+  colors: {
+    onSurfaceVariant: '#334155',
+    primary: '#D32F2F',
+  },
+};
+
+const sharedInputProps = {
+  textColor: '#0f172a',
+  placeholderTextColor: '#475569',
+  underlineColor: '#cbd5e1',
+  activeUnderlineColor: '#D32F2F',
+  theme: inputTheme,
+};
+
 const RegisterScreen = ({ navigation }) => {
   const [form, setForm] = useState({
     nombre1: '',
@@ -50,24 +65,28 @@ const RegisterScreen = ({ navigation }) => {
             value={form.nombre1}
             onChangeText={(v) => setForm({...form, nombre1: v})}
             style={styles.input}
+            {...sharedInputProps}
           />
           <TextInput
             label="Segundo Nombre"
             value={form.nombre2}
             onChangeText={(v) => setForm({...form, nombre2: v})}
             style={styles.input}
+            {...sharedInputProps}
           />
           <TextInput
             label="Primer Apellido"
             value={form.apellido1}
             onChangeText={(v) => setForm({...form, apellido1: v})}
             style={styles.input}
+            {...sharedInputProps}
           />
           <TextInput
             label="Segundo Apellido"
             value={form.apellido2}
             onChangeText={(v) => setForm({...form, apellido2: v})}
             style={styles.input}
+            {...sharedInputProps}
           />
 
           <Text style={styles.sectionTitle}>Cuenta</Text>
@@ -78,6 +97,7 @@ const RegisterScreen = ({ navigation }) => {
             keyboardType="email-address"
             autoCapitalize="none"
             style={styles.input}
+            {...sharedInputProps}
           />
           <TextInput
             label="Contraseña"
@@ -85,12 +105,14 @@ const RegisterScreen = ({ navigation }) => {
             onChangeText={(v) => setForm({...form, password: v})}
             secureTextEntry={true}
             style={styles.input}
+            {...sharedInputProps}
           />
           <TextInput
             label="Nacimiento (YYYY-MM-DD)"
             value={form.birthDate}
             onChangeText={(v) => setForm({...form, birthDate: v})}
             style={styles.input}
+            {...sharedInputProps}
           />
 
           {error ? <HelperText type="error" visible={true}>{error}</HelperText> : null}

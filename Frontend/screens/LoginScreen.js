@@ -3,6 +3,13 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { TextInput, Button, Text, Surface, HelperText } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 
+const inputTheme = {
+  colors: {
+    onSurfaceVariant: '#334155',
+    primary: '#4d82ff',
+  },
+};
+
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -81,6 +88,11 @@ const LoginScreen = ({ navigation }) => {
             autoComplete="email"
             mode="outlined"
             style={styles.input}
+            textColor="#0f172a"
+            placeholderTextColor="#475569"
+            outlineColor="#cbd5e1"
+            activeOutlineColor="#4d82ff"
+            theme={inputTheme}
           />
 
           <Text style={styles.fieldLabel}>Contraseña</Text>
@@ -92,6 +104,11 @@ const LoginScreen = ({ navigation }) => {
             autoComplete="password"
             mode="outlined"
             style={styles.input}
+            textColor="#0f172a"
+            placeholderTextColor="#475569"
+            outlineColor="#cbd5e1"
+            activeOutlineColor="#4d82ff"
+            theme={inputTheme}
           />
 
           <View style={styles.actions}>
