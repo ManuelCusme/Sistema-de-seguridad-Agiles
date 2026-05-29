@@ -46,36 +46,36 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/6] Instalando dependencias del panel web si hacen falta...
-if not exist "%~dp0AdminWeb\node_modules" (
-    pushd "%~dp0AdminWeb"
-    call npm install
-    if errorlevel 1 (
-        popd
-        echo [ERROR] Fallo npm install en AdminWeb.
-        pause
-        exit /b 1
-    )
+echo [2/6] Verificando dependencias del panel web...
+pushd "%~dp0AdminWeb"
+call npm install --prefer-offline
+if errorlevel 1 (
     popd
-) else (
-    echo AdminWeb\node_modules ya existe. Se omite npm install.
+    echo [ERROR] Fallo npm install en AdminWeb.
+    pause
+    exit /b 1
 )
+popd
 
 echo.
-echo [3/6] Instalando dependencias de la app movil si hacen falta...
-if not exist "%~dp0Frontend\node_modules" (
-    pushd "%~dp0Frontend"
-    call npm install
-    if errorlevel 1 (
-        popd
-        echo [ERROR] Fallo npm install en Frontend.
-        pause
-        exit /b 1
-    )
+echo [3/6] Verificando dependencias de la app movil...
+pushd "%~dp0Frontend"
+call npm install --prefer-offline
+if errorlevel 1 (
     popd
-) else (
-    echo Frontend\node_modules ya existe. Se omite npm install.
+    echo [ERROR] Fallo npm install en Frontend.
+    pause
+    exit /b 1
 )
+call npx expo install --check
+if errorlevel 1 (
+    popd
+    echo [ERROR] Las dependencias de Expo no estan alineadas con el SDK instalado.
+    echo Ejecuta: cd Frontend && npx expo install
+    pause
+    exit /b 1
+)
+popd
 
 echo.
 echo [4/6] Sembrando base de datos de prueba en %SQL_SERVER%...
