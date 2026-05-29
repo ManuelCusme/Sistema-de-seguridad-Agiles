@@ -33,6 +33,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo Cerrando instancias anteriores de este sistema para evitar DLL bloqueados...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = (Resolve-Path '%~dp0').Path.TrimEnd('\'); Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and (($_.CommandLine -like ('*' + $root + '*UtaSecurity*')) -or ($_.CommandLine -like ('*' + $root + '*AdminWeb*')) -or ($_.CommandLine -like ('*' + $root + '*Frontend*')) -or ($_.CommandLine -like '*dotnet run --project src\UtaSecurity*') -or ($_.Name -like 'UtaSecurity.*.exe')) } | Where-Object { $_.ProcessId -ne $PID } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; Write-Host ('Cerrado PID ' + $_.ProcessId + ' - ' + $_.Name) } catch { Write-Host ('No se pudo cerrar PID ' + $_.ProcessId) } }"
+timeout /t 2 /nobreak >nul
+
 echo [1/6] Restaurando paquetes .NET...
 dotnet restore "%~dp0UtaSecurity.sln"
 if errorlevel 1 (
