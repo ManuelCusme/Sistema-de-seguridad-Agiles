@@ -76,6 +76,102 @@ const ZONES = [
   },
 ];
 
+const WALKWAY_NODES = {
+  norteOeste: { latitude: -1.26662, longitude: -78.62508 },
+  norteCentro: { latitude: -1.26666, longitude: -78.62425 },
+  norteEste: { latitude: -1.26672, longitude: -78.62320 },
+  centroOeste: { latitude: -1.26818, longitude: -78.62535 },
+  centro: { latitude: -1.26848, longitude: -78.62422 },
+  centroEste: { latitude: -1.26850, longitude: -78.62308 },
+  surOeste: { latitude: -1.27022, longitude: -78.62582 },
+  surCentro: { latitude: -1.27042, longitude: -78.62420 },
+  surEste: { latitude: -1.27055, longitude: -78.62286 },
+};
+
+const WALKWAY_EDGES = [
+  ['norteOeste', 'norteCentro'],
+  ['norteCentro', 'norteEste'],
+  ['norteOeste', 'centroOeste'],
+  ['norteCentro', 'centro'],
+  ['norteEste', 'centroEste'],
+  ['centroOeste', 'centro'],
+  ['centro', 'centroEste'],
+  ['centroOeste', 'surOeste'],
+  ['centro', 'surCentro'],
+  ['centroEste', 'surEste'],
+  ['surOeste', 'surCentro'],
+  ['surCentro', 'surEste'],
+];
+
+const distanceBetween = (a, b) => {
+  const lat = (a.latitude - b.latitude) * 111320;
+  const lng = (a.longitude - b.longitude) * 111320 * Math.cos((a.latitude * Math.PI) / 180);
+  return Math.sqrt((lat * lat) + (lng * lng));
+};
+
+const findNearestWalkwayNode = (point) => {
+  return Object.entries(WALKWAY_NODES).reduce((nearest, [id, coord]) => {
+    const distance = distanceBetween(point, coord);
+    return !nearest || distance < nearest.distance ? { id, distance } : nearest;
+  }, null)?.id;
+};
+
+const getWalkwayRoute = (origin, destination) => {
+  if (!origin || !destination) {
+    return [];
+  }
+
+  const start = findNearestWalkwayNode(origin);
+  const end = findNearestWalkwayNode(destination);
+
+  if (!start || !end) {
+    return [origin, destination];
+  }
+
+  const graph = WALKWAY_EDGES.reduce((acc, [a, b]) => {
+    acc[a] = acc[a] || [];
+    acc[b] = acc[b] || [];
+    const weight = distanceBetween(WALKWAY_NODES[a], WALKWAY_NODES[b]);
+    acc[a].push({ id: b, weight });
+    acc[b].push({ id: a, weight });
+    return acc;
+  }, {});
+
+  const distances = Object.keys(WALKWAY_NODES).reduce((acc, id) => ({ ...acc, [id]: Infinity }), {});
+  const previous = {};
+  const pending = new Set(Object.keys(WALKWAY_NODES));
+  distances[start] = 0;
+
+  while (pending.size) {
+    const current = [...pending].sort((a, b) => distances[a] - distances[b])[0];
+    pending.delete(current);
+
+    if (current === end) break;
+
+    (graph[current] || []).forEach((neighbor) => {
+      const nextDistance = distances[current] + neighbor.weight;
+      if (nextDistance < distances[neighbor.id]) {
+        distances[neighbor.id] = nextDistance;
+        previous[neighbor.id] = current;
+      }
+    });
+  }
+
+  const pathIds = [];
+  let cursor = end;
+  while (cursor) {
+    pathIds.unshift(cursor);
+    if (cursor === start) break;
+    cursor = previous[cursor];
+  }
+
+  if (pathIds[0] !== start) {
+    return [origin, destination];
+  }
+
+  return [origin, ...pathIds.map((id) => WALKWAY_NODES[id]), destination];
+};
+
 const getZoneLabel = (zoneName = '') => {
   const normalized = String(zoneName).toUpperCase();
 
@@ -506,6 +602,7 @@ const GuardScreen = () => {
 
     const mapButton = (
       <Button
+        key="location"
         mode="outlined"
         textColor="#2f6bff"
         onPress={() => openIncidentMap(alert)}
@@ -518,9 +615,9 @@ const GuardScreen = () => {
     );
 
     if (alert.status === 'PENDIENTE') {
-      return (
-        <>
+      const acceptButton = (
           <Button
+            key="accept"
             mode="contained"
             buttonColor="#FFFFFF"
             textColor="#1B5E20"
@@ -543,13 +640,13 @@ const GuardScreen = () => {
               'Asumir caso'
             )}
           </Button>
-          {mapButton}
-        </>
       );
+
+      return [acceptButton, mapButton];
     } else if (alert.status === 'ASIGNADO') {
-      return (
-        <>
+      const closeButton = (
           <Button
+            key="close"
             mode="contained"
             buttonColor="#9E9E9E"
             textColor="#FFFFFF"
@@ -572,9 +669,9 @@ const GuardScreen = () => {
               'Cerrar caso'
             )}
           </Button>
-          {mapButton}
-        </>
       );
+
+      return [closeButton, mapButton];
     }
 
     return mapButton;
@@ -585,7 +682,7 @@ const GuardScreen = () => {
       latitude: selectedMapAlert.pos.lat,
       longitude: selectedMapAlert.pos.lng,
     };
-    const routePoints = currentLocation ? [currentLocation, destination] : [];
+    const routePoints = getWalkwayRoute(currentLocation, destination);
 
     return (
       <View style={styles.mapScreen}>
@@ -621,7 +718,7 @@ const GuardScreen = () => {
             />
           ))}
 
-          {routePoints.length === 2 && (
+          {routePoints.length > 1 && (
             <Polyline coordinates={routePoints} strokeColor="#2f6bff" strokeWidth={4} />
           )}
 
@@ -643,7 +740,7 @@ const GuardScreen = () => {
         <Surface style={styles.mapStatusPanel}>
           <Text style={styles.sectionKicker}>SEGUIMIENTO</Text>
           <Text style={styles.mapStatusTitle}>{currentLocation ? 'Ubicación del guardia activa' : 'Esperando GPS del guardia'}</Text>
-          <Text style={styles.mapStatusText}>{locationError || 'El administrador recibirá tu ubicación mientras te desplazas hacia la incidencia.'}</Text>
+          <Text style={styles.mapStatusText}>{locationError || 'Ruta sugerida por senderos y pasos permitidos del campus. El administrador recibirá tu ubicación mientras avanzas.'}</Text>
           <Button mode="contained" buttonColor="#0b3354" onPress={recenterMap} style={styles.mapStatusButton}>Centrar recorrido</Button>
         </Surface>
       </View>

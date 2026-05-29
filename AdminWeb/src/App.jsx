@@ -311,7 +311,7 @@ const getTimelineConfig = (range) => {
 };
 
 const dashboardReferenceNow = Date.now();
-const DEFAULT_OPEN_ZOOM = 17;
+const DEFAULT_OPEN_ZOOM = 16;
 const CAMPUS_CENTER = { lat: -1.2687, lng: -78.6247 };
 const MAP_OPTIONS = {
   zoomControl: true,
@@ -489,6 +489,7 @@ function App({ onLogout, session }) {
   const [alertsDrawerOpen, setAlertsDrawerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mapFiltersOpen, setMapFiltersOpen] = useState(false);
+  const [mapGuardsOpen, setMapGuardsOpen] = useState(false);
   const [statsFilterOpen, setStatsFilterOpen] = useState(false);
   const [statsScope, setStatsScope] = useState('all');
   const [statsRange, setStatsRange] = useState('7D');
@@ -977,6 +978,12 @@ function App({ onLogout, session }) {
                 Filtros
               </button>
             )}
+            {view === 'mapa' && (
+              <button className="ghost-btn" type="button" onClick={() => setMapGuardsOpen((value) => !value)}>
+                <ShieldAlert size={16} />
+                Guardias
+              </button>
+            )}
             <button className="ghost-btn" type="button" onClick={() => setAlertsDrawerOpen((value) => !value)}>
               <Bell size={16} />
               Incidencias
@@ -989,8 +996,8 @@ function App({ onLogout, session }) {
             <div className="map-workspace">
               <section className="panel panel--map panel--map-focus">
                 <div className="map-shell">
-                    <MapContainer center={[CAMPUS_CENTER.lat, CAMPUS_CENTER.lng]} zoom={DEFAULT_OPEN_ZOOM} maxZoom={20} className="map" {...MAP_OPTIONS}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <MapContainer center={[CAMPUS_CENTER.lat, CAMPUS_CENTER.lng]} zoom={DEFAULT_OPEN_ZOOM} maxZoom={18} wheelPxPerZoomLevel={90} className="map" {...MAP_OPTIONS}>
+                    <TileLayer maxZoom={18} maxNativeZoom={18} url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                       <RecenterMap resetKey={mapResetKey} />
                       {activeCoords && <FocusMap coords={activeCoords} />}
 
@@ -1079,10 +1086,15 @@ function App({ onLogout, session }) {
                 </div>
               )}
 
+              {mapGuardsOpen && (
               <div className="map-floating map-floating--guards">
+                <div className="map-floating__header">
+                  <strong>Guardias activos</strong>
+                  <button type="button" onClick={() => setMapGuardsOpen(false)}>Cerrar</button>
+                </div>
                 <div className="guard-list">
                   <div className="incident-list__header">
-                    <h3>Guardias activos</h3>
+                    <h3>En mapa</h3>
                     <span>{activeGuards.length}</span>
                   </div>
                   {activeGuards.map((guard) => (
@@ -1098,6 +1110,7 @@ function App({ onLogout, session }) {
                   {activeGuards.length === 0 && <p className="empty-state">Aún no hay guardias reportando ubicación.</p>}
                 </div>
               </div>
+              )}
 
               {alertsDrawerOpen && (
                 <div className="map-floating map-floating--incidents">

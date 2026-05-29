@@ -91,7 +91,8 @@ button {
 
 .sidebar-toggle--floating {
   position: fixed;
-  top: 14px;
+  top: auto;
+  bottom: 18px;
   left: 14px;
   z-index: 600;
   background: rgba(11, 51, 84, 0.92);
@@ -850,7 +851,7 @@ button {
 
 .map-floating--guards {
   left: 18px;
-  bottom: 18px;
+  bottom: 78px;
   width: min(320px, calc(100% - 36px));
   max-height: 34vh;
   overflow-y: auto;
