@@ -101,8 +101,9 @@ namespace UtaSecurity.Services.Incidents.Controllers
 
             objNuevaAlerta.incZona = zonaDetectada;
 
-            // Transmitir la alerta a todos los guardias conectados por WebSocket
-            await _hubContext.Clients.All.SendAsync("ReceiveAlert", objNuevaAlerta);
+            // HU-10/HU-12: enviar a administradores, guardias en servicio y miembros de confianza.
+            var notificationGroups = await GetIncidentNotificationGroupsAsync(usuId);
+            await _hubContext.Clients.Groups(notificationGroups).SendAsync("ReceiveAlert", objNuevaAlerta);
             await ExpoPushNotificationService.NotifyIncidentAsync(_httpClientFactory, objNuevaAlerta, _logger);
 
             // Guardar en Base de Datos
@@ -136,6 +137,29 @@ namespace UtaSecurity.Services.Incidents.Controllers
                 mensaje = "Alerta de incidente registrada y transmitida exitosamente.",
                 data = objNuevaAlerta
             });
+        }
+
+        private async Task<IReadOnlyList<string>> GetIncidentNotificationGroupsAsync(Guid reporterUserId)
+        {
+            var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                AlertConnectionRegistry.GuardsOnDutyGroup,
+                AlertConnectionRegistry.AdminsGroup
+            };
+
+            var trustMemberIds = await _context.TrustGroups
+                .AsNoTracking()
+                .Where(group => group.OwnerUserId == reporterUserId && group.IsActive)
+                .SelectMany(group => group.Members.Where(member => member.IsActive).Select(member => member.MemberUserId))
+                .Distinct()
+                .ToListAsync();
+
+            foreach (var memberUserId in trustMemberIds)
+            {
+                groups.Add($"{AlertConnectionRegistry.TrustUserGroupPrefix}{memberUserId}");
+            }
+
+            return groups.ToList();
         }
 
         [HttpGet]
