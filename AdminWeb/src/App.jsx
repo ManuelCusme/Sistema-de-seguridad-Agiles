@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as signalR from '@microsoft/signalr';
 import { MapContainer, Marker, Polygon, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { BarChart3, Bell, CircleAlert, Filter, Flame, HandCoins, HeartPulse, MapPin, Search, ShieldAlert, SlidersHorizontal, TriangleAlert } from 'lucide-react';
+import { BarChart3, Bell, CircleAlert, Filter, Flame, HandCoins, HeartPulse, ListChecks, MapPin, Search, ShieldAlert, SlidersHorizontal, Tags, TriangleAlert } from 'lucide-react';
 import axios from 'axios';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
@@ -423,6 +423,14 @@ function Tabs({ active, onChange }) {
         <BarChart3 size={16} />
         Estadísticas
       </button>
+      <button className={`tab ${active === 'rondas' ? 'tab--active' : ''}`} onClick={() => onChange('rondas')}>
+        <ListChecks size={16} />
+        Rondas
+      </button>
+      <button className={`tab ${active === 'tipos' ? 'tab--active' : ''}`} onClick={() => onChange('tipos')}>
+        <Tags size={16} />
+        Tipos
+      </button>
     </div>
   );
 }
@@ -509,6 +517,10 @@ function App({ onLogout, session }) {
   const [toast, setToast] = useState(null);
   const [userLookup, setUserLookup] = useState({});
   const [guardLocations, setGuardLocations] = useState({});
+  const [guardRounds, setGuardRounds] = useState([]);
+  const [incidentTypes, setIncidentTypes] = useState([]);
+  const [typeForm, setTypeForm] = useState({ id: '', nombre: '', codigo: '', emoji: '🚨', color: '#4d82ff' });
+  const [typeSaving, setTypeSaving] = useState(false);
   const [recentIncidentIds, setRecentIncidentIds] = useState({});
   const recentIncidentTimersRef = useRef({});
 
@@ -547,6 +559,86 @@ function App({ onLogout, session }) {
     setCloseTarget(alert);
     setCloseObservation('No se encuentra en la Universidad');
     setCloseModalVisible(true);
+  };
+
+  const loadGuardRounds = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/guard-rounds`);
+      setGuardRounds(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      showToast(`No se pudieron cargar rondas: ${error?.message || 'error desconocido'}`, 'error');
+    }
+  };
+
+  const loadIncidentTypes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/incident-types`, {
+        params: { includeInactive: true },
+      });
+      setIncidentTypes(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      showToast(`No se pudieron cargar tipos: ${error?.message || 'error desconocido'}`, 'error');
+    }
+  };
+
+  const resetTypeForm = () => {
+    setTypeForm({ id: '', nombre: '', codigo: '', emoji: '🚨', color: '#4d82ff' });
+  };
+
+  const editIncidentType = (item) => {
+    setTypeForm({
+      id: item.id || '',
+      nombre: item.nombre || '',
+      codigo: item.codigo || '',
+      emoji: item.emoji || '🚨',
+      color: item.color || '#4d82ff',
+    });
+    setView('tipos');
+  };
+
+  const saveIncidentType = async () => {
+    const payload = {
+      nombre: typeForm.nombre.trim(),
+      codigo: typeForm.codigo.trim(),
+      emoji: typeForm.emoji.trim() || '🚨',
+      color: typeForm.color.trim() || '#4d82ff',
+    };
+
+    if (!payload.nombre) {
+      showToast('El nombre del tipo es obligatorio.', 'error');
+      return;
+    }
+
+    setTypeSaving(true);
+    try {
+      if (typeForm.id) {
+        await axios.put(`${API_BASE_URL}/api/incident-types/${typeForm.id}`, payload);
+      } else {
+        await axios.post(`${API_BASE_URL}/api/incident-types`, payload);
+      }
+      resetTypeForm();
+      await loadIncidentTypes();
+      showToast('Tipo de incidente guardado.');
+    } catch (error) {
+      const message = error?.response?.data?.error || error?.message || 'No se pudo guardar el tipo.';
+      showToast(message, 'error');
+    } finally {
+      setTypeSaving(false);
+    }
+  };
+
+  const deleteIncidentType = async (item) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/api/incident-types/${item.id}`);
+      await loadIncidentTypes();
+      if (typeForm.id === item.id) {
+        resetTypeForm();
+      }
+      showToast('Tipo desactivado correctamente.');
+    } catch (error) {
+      const message = error?.response?.data?.error || error?.message || 'No se pudo desactivar el tipo.';
+      showToast(message, 'error');
+    }
   };
 
   const handleCloseIncident = async () => {
@@ -690,10 +782,12 @@ function App({ onLogout, session }) {
 
     loadUsers();
     loadIncidents();
+    loadGuardRounds();
+    loadIncidentTypes();
 
     const serverIp = window.location.hostname;
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(`http://${serverIp}:5000/hubs/alerts`)
+      .withUrl(`http://${serverIp}:5000/hubs/alerts?userId=${encodeURIComponent(session?.userId || '')}&role=Admin`)
       .withAutomaticReconnect()
       .build();
 
@@ -782,6 +876,26 @@ function App({ onLogout, session }) {
   }, []);
 
   const activeGuards = useMemo(() => Object.values(guardLocations), [guardLocations]);
+  const activeIncidentTypes = useMemo(() => {
+    const dynamicTypes = incidentTypes
+      .filter((item) => item.activo !== false)
+      .map((item) => ({
+        value: String(item.codigo || '').toUpperCase(),
+        label: item.nombre || item.codigo,
+        color: item.color || '#4d82ff',
+        glyph: item.emoji || '🚨',
+      }))
+      .filter((item) => item.value);
+
+    const fallbackTypes = Object.keys(motiveColors).map((value) => ({
+      value,
+      label: value,
+      color: motiveColors[value],
+      glyph: motiveGlyphs[value] || '📍',
+    }));
+
+    return [...dynamicTypes, ...fallbackTypes.filter((fallback) => !dynamicTypes.some((item) => item.value === fallback.value))];
+  }, [incidentTypes]);
 
   const rangeFilteredAlerts = useMemo(() => {
     const limitMs = getRangeLimitMs(statsRange);
@@ -1110,12 +1224,9 @@ function App({ onLogout, session }) {
                     Tipo
                     <select value={filterMotivo} onChange={(e) => setFilterMotivo(e.target.value)}>
                       <option value="TODOS">Todos</option>
-                      <option value="EMERGENCIA">Emergencia</option>
-                      <option value="ROBO">Robo</option>
-                      <option value="SOSPECHOSO">Sospechoso</option>
-                      <option value="MEDICO">Médico</option>
-                      <option value="INCENDIO">Incendio</option>
-                      <option value="AGRESIÓN">Agresión</option>
+                      {activeIncidentTypes.map((type) => (
+                        <option key={type.value} value={type.value}>{type.label}</option>
+                      ))}
                     </select>
                   </label>
                 </div>
@@ -1310,12 +1421,9 @@ function App({ onLogout, session }) {
                   Tipo
                   <select value={filterMotivo} onChange={(e) => setFilterMotivo(e.target.value)}>
                     <option value="TODOS">Todos</option>
-                    <option value="EMERGENCIA">Emergencia</option>
-                    <option value="ROBO">Robo</option>
-                    <option value="SOSPECHOSO">Sospechoso</option>
-                    <option value="MEDICO">Médico</option>
-                    <option value="INCENDIO">Incendio</option>
-                    <option value="AGRESIÓN">Agresión</option>
+                      {activeIncidentTypes.map((type) => (
+                        <option key={type.value} value={type.value}>{type.label}</option>
+                      ))}
                   </select>
                 </label>
                 <label>
@@ -1371,6 +1479,100 @@ function App({ onLogout, session }) {
                 </div>
 
                 <TimelineBars values={timelineBreakdown} variant={timelineConfig.variant} />
+              </section>
+            </div>
+          </section>
+        )}
+
+        {view === 'rondas' && (
+          <section className="layout layout--history">
+            <div className="summary-grid">
+              <StatCard title="Rondas totales" value={guardRounds.length} detail="Todos los guardias" tone="accent" />
+              <StatCard title="En curso" value={guardRounds.filter((item) => item.estado === 'EN_CURSO').length} detail="Recorridos activos" />
+              <StatCard title="Finalizadas" value={guardRounds.filter((item) => item.estado === 'FINALIZADA').length} detail="Con observacion registrada" tone="soft" />
+            </div>
+
+            <section className="panel panel--wide">
+              <div className="panel__header">
+                <div>
+                  <h3>Rondas de guardias</h3>
+                  <p>Historial operativo de inicio, cierre, duracion y observacion obligatoria.</p>
+                </div>
+                <button type="button" className="ghost-btn ghost-btn--small" onClick={loadGuardRounds}>Actualizar</button>
+              </div>
+              <div className="table-list">
+                {guardRounds.map((round) => (
+                  <article key={round.rondaId} className="table-row-card">
+                    <div>
+                      <strong>{round.zona}</strong>
+                      <p>Guardia: {resolveUserName(round.guardiaId)}</p>
+                    </div>
+                    <div>
+                      <span className={`incident-card__status incident-card__status--${String(round.estado || '').toLowerCase().replace(/\s+/g, '-')}`}>{round.estado}</span>
+                      <p>{formatLocalDateTime(round.horaInicio)} - {round.horaFin ? formatLocalDateTime(round.horaFin) : 'En curso'}</p>
+                    </div>
+                    <div>
+                      <strong>{round.duracionMinutos ?? 0} min</strong>
+                      <p>{round.observacion || 'Sin observacion de cierre'}</p>
+                    </div>
+                  </article>
+                ))}
+                {guardRounds.length === 0 && <p className="empty-state">No hay rondas registradas.</p>}
+              </div>
+            </section>
+          </section>
+        )}
+
+        {view === 'tipos' && (
+          <section className="layout layout--history">
+            <div className="summary-grid">
+              <StatCard title="Tipos activos" value={incidentTypes.filter((item) => item.activo !== false).length} detail="Disponibles en la app movil" tone="accent" />
+              <StatCard title="Tipos inactivos" value={incidentTypes.filter((item) => item.activo === false).length} detail="Soft delete" />
+            </div>
+
+            <div className="content-grid">
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <h3>{typeForm.id ? 'Editar tipo' : 'Crear tipo'}</h3>
+                    <p>El codigo es el valor que consumen la app movil y los filtros.</p>
+                  </div>
+                </div>
+                <div className="type-form">
+                  <label>Nombre<input value={typeForm.nombre} onChange={(e) => setTypeForm((prev) => ({ ...prev, nombre: e.target.value }))} placeholder="Robo/Asalto" /></label>
+                  <label>Codigo<input value={typeForm.codigo} onChange={(e) => setTypeForm((prev) => ({ ...prev, codigo: e.target.value.toUpperCase() }))} placeholder="ROBO_ASALTO" /></label>
+                  <label>Icono<input value={typeForm.emoji} onChange={(e) => setTypeForm((prev) => ({ ...prev, emoji: e.target.value }))} placeholder="🚨" /></label>
+                  <label>Color<input type="color" value={typeForm.color} onChange={(e) => setTypeForm((prev) => ({ ...prev, color: e.target.value }))} /></label>
+                  <div className="type-form__actions">
+                    <button type="button" className="primary-btn" onClick={saveIncidentType} disabled={typeSaving}>{typeSaving ? 'Guardando...' : 'Guardar'}</button>
+                    <button type="button" className="ghost-btn" onClick={resetTypeForm}>Limpiar</button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel panel--wide">
+                <div className="panel__header">
+                  <div>
+                    <h3>Tipos de incidente</h3>
+                    <p>CRUD administrativo con eliminacion logica.</p>
+                  </div>
+                  <button type="button" className="ghost-btn ghost-btn--small" onClick={loadIncidentTypes}>Actualizar</button>
+                </div>
+                <div className="type-grid">
+                  {incidentTypes.map((item) => (
+                    <article key={item.id} className={`type-card ${item.activo === false ? 'type-card--inactive' : ''}`}>
+                      <span className="type-card__icon" style={{ background: `${item.color || '#4d82ff'}22`, color: item.color || '#4d82ff' }}>{item.emoji || '🚨'}</span>
+                      <strong>{item.nombre}</strong>
+                      <p>{item.codigo}</p>
+                      <small>{item.activo === false ? 'Inactivo' : 'Activo'}</small>
+                      <div className="type-card__actions">
+                        <button type="button" className="ghost-btn ghost-btn--small" onClick={() => editIncidentType(item)}>Editar</button>
+                        {item.activo !== false && <button type="button" className="ghost-btn ghost-btn--small" onClick={() => deleteIncidentType(item)}>Eliminar</button>}
+                      </div>
+                    </article>
+                  ))}
+                  {incidentTypes.length === 0 && <p className="empty-state">No hay tipos registrados.</p>}
+                </div>
               </section>
             </div>
           </section>
