@@ -129,6 +129,105 @@ GO
     GO
 
 -- ============================================================
+-- TABLAS HU-10: Grupos de confianza
+-- ============================================================
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[TrustGroups]') AND type = N'U')
+BEGIN
+    CREATE TABLE TrustGroups (
+        Id          UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        OwnerUserId UNIQUEIDENTIFIER NOT NULL REFERENCES Users(Id),
+        Name        NVARCHAR(120)    NOT NULL,
+        CreatedAt   DATETIME         NOT NULL DEFAULT GETDATE(),
+        IsActive    BIT              NOT NULL DEFAULT 1
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[TrustGroupMembers]') AND type = N'U')
+BEGIN
+    CREATE TABLE TrustGroupMembers (
+        Id           UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        TrustGroupId UNIQUEIDENTIFIER NOT NULL REFERENCES TrustGroups(Id),
+        MemberUserId UNIQUEIDENTIFIER NOT NULL REFERENCES Users(Id),
+        CreatedAt    DATETIME         NOT NULL DEFAULT GETDATE(),
+        IsActive     BIT              NOT NULL DEFAULT 1
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_TrustGroupMembers_Group_User' AND object_id = OBJECT_ID('dbo.TrustGroupMembers'))
+BEGIN
+    CREATE UNIQUE INDEX UX_TrustGroupMembers_Group_User ON TrustGroupMembers(TrustGroupId, MemberUserId);
+END
+GO
+
+-- ============================================================
+-- TABLAS HU-11 / HU-12: Rondas y estado de guardia
+-- ============================================================
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[GuardRounds]') AND type = N'U')
+BEGIN
+    CREATE TABLE GuardRounds (
+        Id              UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        GuardUserId     UNIQUEIDENTIFIER NOT NULL REFERENCES Users(Id),
+        Zone            NVARCHAR(100)    NOT NULL,
+        StartedAt       DATETIME         NOT NULL DEFAULT GETDATE(),
+        EndedAt         DATETIME         NULL,
+        Observation     NVARCHAR(500)    NULL,
+        DurationMinutes INT              NULL,
+        Status          NVARCHAR(20)     NOT NULL DEFAULT 'EN_CURSO'
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[GuardDutyStatuses]') AND type = N'U')
+BEGIN
+    CREATE TABLE GuardDutyStatuses (
+        GuardUserId UNIQUEIDENTIFIER PRIMARY KEY REFERENCES Users(Id),
+        IsOnDuty    BIT              NOT NULL DEFAULT 1,
+        UpdatedAt   DATETIME         NOT NULL DEFAULT GETDATE()
+    );
+END
+GO
+
+-- ============================================================
+-- TABLA HU-13: Tipos de incidente con soft delete
+-- ============================================================
+IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[IncidentTypes]') AND type = N'U')
+BEGIN
+    CREATE TABLE IncidentTypes (
+        Id        UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+        Name      NVARCHAR(100)    NOT NULL,
+        Code      NVARCHAR(60)     NOT NULL,
+        Emoji     NVARCHAR(20)     NOT NULL,
+        Color     NVARCHAR(20)     NOT NULL,
+        IsActive  BIT              NOT NULL DEFAULT 1,
+        CreatedAt DATETIME         NOT NULL DEFAULT GETDATE(),
+        UpdatedAt DATETIME         NULL
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_IncidentTypes_Code' AND object_id = OBJECT_ID('dbo.IncidentTypes'))
+BEGIN
+    CREATE UNIQUE INDEX UX_IncidentTypes_Code ON IncidentTypes(Code);
+END
+GO
+
+MERGE IncidentTypes AS target
+USING (VALUES
+    ('Robo/Asalto', 'ROBO_ASALTO', NCHAR(0xD83D) + NCHAR(0xDCB0), '#ff4fa3'),
+    ('Arma blanca', 'ARMA_BLANCA', NCHAR(0xD83D) + NCHAR(0xDEE1), '#ef4444'),
+    ('Desmayo/Emergencia medica', 'DESMAYO_EMERGENCIA_MEDICA', NCHAR(0x2764), '#8f65ff'),
+    ('Amenaza', 'AMENAZA', NCHAR(0x26A0), '#f7c948'),
+    ('Otros', 'OTROS', NCHAR(0xD83D) + NCHAR(0xDEA8), '#4d82ff')
+) AS source (Name, Code, Emoji, Color)
+ON target.Code = source.Code
+WHEN NOT MATCHED THEN
+    INSERT (Id, Name, Code, Emoji, Color, IsActive, CreatedAt)
+    VALUES (NEWID(), source.Name, source.Code, source.Emoji, source.Color, 1, GETDATE());
+GO
+
+-- ============================================================
 -- SEED: Zonas del campus Huachi (4 zonas operativas)
 -- ============================================================
 IF NOT EXISTS (SELECT * FROM Geofences WHERE Boundary IS NOT NULL)

@@ -16,9 +16,10 @@ import { Text, Title, Paragraph, Card, Surface, IconButton, Button } from 'react
 import * as signalR from '@microsoft/signalr';
 import * as Location from 'expo-location';
 import axios from 'axios';
+import { Picker } from '@react-native-picker/picker';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
-import { getIncidentByValue } from '../constants/incidentCatalog';
+import { INCIDENT_CATALOG, getIncidentByValue, mapIncidentTypesFromApi } from '../constants/incidentCatalog';
 import { ALERTS_HUB_URL } from '../config/network';
 
 const CAMPUS_CENTER = {
@@ -243,6 +244,12 @@ const GuardScreen = () => {
   const [locationError, setLocationError] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('alertas');
+  const [incidentCatalog, setIncidentCatalog] = useState(INCIDENT_CATALOG);
+  const [rounds, setRounds] = useState([]);
+  const [activeRound, setActiveRound] = useState(null);
+  const [roundZone, setRoundZone] = useState('Zona 1');
+  const [roundObservation, setRoundObservation] = useState('');
+  const [roundLoading, setRoundLoading] = useState(false);
   const mapRef = useRef(null);
   const connectionRef = useRef(null);
   const trackingIncidentRef = useRef(null);
@@ -254,6 +261,7 @@ const GuardScreen = () => {
     return String(item.assignedBy || '') === myUserId || String(item.closedBy || '') === myUserId;
   });
   const visibleAlerts = activeTab === 'historial' ? historyAlerts : activeAlerts;
+  const visibleData = activeTab === 'perfil' ? [] : activeTab === 'rondas' ? rounds : visibleAlerts;
   const activeTrackingIncident = selectedMapAlert || activeAlerts.find((item) => item.status === 'ASIGNADO' && String(item.assignedBy || '') === myUserId) || null;
 
   trackingIncidentRef.current = activeTrackingIncident;
@@ -263,12 +271,22 @@ const GuardScreen = () => {
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
-  const toggleDuty = () => {
-    setIsOnDuty((current) => !current);
+  const toggleDuty = async () => {
+    const nextValue = !isOnDuty;
+    setIsOnDuty(nextValue);
+    try {
+      await axios.put(`${API_URL}/guard-duty`, {
+        usuId: myUserId,
+        enServicio: nextValue,
+      });
+    } catch (error) {
+      console.error('No se pudo actualizar el estado de servicio:', error.message);
+      setIsOnDuty(!nextValue);
+    }
   };
 
   const mapIncident = (incidente) => {
-    const catalogItem = getIncidentByValue(incidente.incMotivo || 'EMERGENCIA');
+    const catalogItem = getIncidentByValue(incidente.incMotivo || 'OTROS', incidentCatalog);
     const timestamp = new Date(incidente.incFechaReporte || Date.now()).getTime();
     return {
       id: incidente.incId || Date.now().toString(),
@@ -289,6 +307,76 @@ const GuardScreen = () => {
       observation: incidente.incObservacion || '',
       timestamp,
     };
+  };
+
+  const loadIncidentTypes = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/incident-types`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      setIncidentCatalog(mapIncidentTypesFromApi(response.data));
+    } catch (error) {
+      console.error('No se pudieron cargar tipos de incidente:', error.message);
+    }
+  };
+
+  const loadDutyStatus = async () => {
+    if (!myUserId) return;
+    try {
+      const response = await axios.get(`${API_URL}/guard-duty/${myUserId}`);
+      setIsOnDuty(response.data?.enServicio !== false);
+    } catch (error) {
+      console.error('No se pudo cargar estado de servicio:', error.message);
+    }
+  };
+
+  const loadRounds = async () => {
+    if (!myUserId) return;
+    setRoundLoading(true);
+    try {
+      const response = await axios.get(`${API_URL}/guard-rounds`, { params: { usuId: myUserId } });
+      const items = Array.isArray(response.data) ? response.data : [];
+      setRounds(items);
+      setActiveRound(items.find((item) => item.estado === 'EN_CURSO') || null);
+    } catch (error) {
+      console.error('No se pudieron cargar rondas:', error.message);
+    } finally {
+      setRoundLoading(false);
+    }
+  };
+
+  const startRound = async () => {
+    if (!myUserId || !roundZone) return;
+    setRoundLoading(true);
+    try {
+      await axios.post(`${API_URL}/guard-rounds/start`, {
+        usuId: myUserId,
+        zona: roundZone,
+      });
+      await loadRounds();
+    } catch (error) {
+      console.error('No se pudo iniciar ronda:', error.message);
+    } finally {
+      setRoundLoading(false);
+    }
+  };
+
+  const finishRound = async () => {
+    if (!activeRound || !roundObservation.trim()) return;
+    setRoundLoading(true);
+    try {
+      await axios.post(`${API_URL}/guard-rounds/finish`, {
+        rondaId: activeRound.rondaId,
+        usuId: myUserId,
+        observacion: roundObservation.trim(),
+      });
+      setRoundObservation('');
+      await loadRounds();
+    } catch (error) {
+      console.error('No se pudo finalizar ronda:', error.message);
+    } finally {
+      setRoundLoading(false);
+    }
   };
 
   const publishGuardLocation = (location = currentLocation, incident = trackingIncidentRef.current) => {
@@ -462,6 +550,12 @@ const GuardScreen = () => {
   };
 
   useEffect(() => {
+    loadIncidentTypes();
+    loadDutyStatus();
+    loadRounds();
+  }, [myUserId]);
+
+  useEffect(() => {
     let mounted = true;
 
     const loadExistingAlerts = async () => {
@@ -496,7 +590,7 @@ const GuardScreen = () => {
     return () => {
       mounted = false;
     };
-  }, [API_URL, user?.token]);
+  }, [API_URL, token, incidentCatalog]);
 
   /**
    * Validar si el botón de confirmar cierre debe estar habilitado
@@ -508,8 +602,11 @@ const GuardScreen = () => {
   useEffect(() => {
     let shouldStopAfterStart = false;
 
+    const separator = ALERTS_HUB_URL.includes('?') ? '&' : '?';
+    const hubUrl = `${ALERTS_HUB_URL}${separator}userId=${encodeURIComponent(myUserId)}&role=Guardia`;
+
     const newConnection = new signalR.HubConnectionBuilder()
-      .withUrl(ALERTS_HUB_URL)
+      .withUrl(hubUrl)
       .withAutomaticReconnect()
       .build();
 
@@ -518,7 +615,7 @@ const GuardScreen = () => {
     newConnection.on("ReceiveAlert", (incidente) => {
       // El backend envía un objeto IncidentDto con campos: incLatitud, incLongitud,
       // incMotivo, incReportadoPor, incFacultad, incGeocercaNombre, incId, incFechaReporte
-      const catalogItem = getIncidentByValue(incidente.incMotivo || 'EMERGENCIA');
+      const catalogItem = getIncidentByValue(incidente.incMotivo || 'OTROS', incidentCatalog);
       const zoneName = incidente.incGeocercaNombre || incidente.incZona || '';
       const newAlert = {
         id:       incidente.incId || Date.now().toString(),
@@ -571,7 +668,7 @@ const GuardScreen = () => {
         }
       });
     };
-  }, []);
+  }, [myUserId, incidentCatalog]);
 
   useEffect(() => {
     let locationSubscription;
@@ -702,6 +799,26 @@ const GuardScreen = () => {
     return mapButton;
   };
 
+  const renderRoundCard = ({ item }) => (
+    <Card style={styles.card}>
+      <Card.Content>
+        <View style={styles.cardTopRow}>
+          <View style={styles.cardMainBlock}>
+            <View style={styles.cardTitleRow}>
+              <Text style={styles.cardEmoji}>🚶</Text>
+              <Title style={styles.cardTitle}>{item.zona}</Title>
+              <Text style={styles.statusBadge(item.estado)}>{item.estado}</Text>
+            </View>
+            <Paragraph style={styles.cardMeta}>Inicio: {new Date(item.horaInicio).toLocaleString('es-EC')}</Paragraph>
+            <Paragraph style={styles.cardMeta}>Fin: {item.horaFin ? new Date(item.horaFin).toLocaleString('es-EC') : 'En curso'}</Paragraph>
+            <Paragraph style={styles.cardZone}>Duración: {item.duracionMinutos ?? 0} min</Paragraph>
+            {!!item.observacion && <Paragraph style={styles.cardObservation}>Observación: {item.observacion}</Paragraph>}
+          </View>
+        </View>
+      </Card.Content>
+    </Card>
+  );
+
   if (selectedMapAlert) {
     const destination = {
       latitude: selectedMapAlert.pos.lat,
@@ -798,6 +915,9 @@ const GuardScreen = () => {
             <TouchableOpacity style={[styles.drawerItem, activeTab === 'historial' && styles.drawerItemActive]} onPress={() => { setActiveTab('historial'); setDrawerOpen(false); }}>
               <Text style={styles.drawerItemText}>🕘 Historial</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={[styles.drawerItem, activeTab === 'rondas' && styles.drawerItemActive]} onPress={() => { setActiveTab('rondas'); setDrawerOpen(false); loadRounds(); }}>
+              <Text style={styles.drawerItemText}>Rondas</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={[styles.drawerItem, activeTab === 'perfil' && styles.drawerItemActive]} onPress={() => { setActiveTab('perfil'); setDrawerOpen(false); }}>
               <Text style={styles.drawerItemText}>👤 Perfil</Text>
             </TouchableOpacity>
@@ -809,11 +929,52 @@ const GuardScreen = () => {
       )}
 
       <FlatList
-        data={visibleAlerts}
-        keyExtractor={(item) => item.id}
+        data={visibleData}
+        keyExtractor={(item) => item.id || item.rondaId}
         ListHeaderComponent={(
           <View style={styles.headerContent}>
-            {activeTab !== 'perfil' ? (
+            {activeTab === 'rondas' ? (
+              <>
+                <Surface style={styles.heroCard}>
+                  <Text style={styles.heroKicker}>RONDAS DEL GUARDIA</Text>
+                  <Text style={styles.heroTitle}>{activeRound ? 'Ronda en curso' : 'Inicia una ronda'}</Text>
+                  <Text style={styles.heroSubtitle}>{activeRound ? `Zona: ${activeRound.zona}` : 'Selecciona una zona para registrar inicio y cierre.'}</Text>
+
+                  <View style={styles.roundPanel}>
+                    {!activeRound ? (
+                      <>
+                        <Picker selectedValue={roundZone} onValueChange={setRoundZone} style={styles.roundPicker}>
+                          {ZONES.map((zone) => (
+                            <Picker.Item key={zone.id} label={zone.name} value={zone.name} />
+                          ))}
+                        </Picker>
+                        <Button mode="contained" onPress={startRound} disabled={roundLoading} style={styles.roundButton}>
+                          Iniciar ronda
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <TextInput
+                          style={styles.roundTextInput}
+                          placeholder="Observación obligatoria"
+                          value={roundObservation}
+                          onChangeText={setRoundObservation}
+                          multiline
+                        />
+                        <Button mode="contained" onPress={finishRound} disabled={roundLoading || !roundObservation.trim()} style={styles.roundButton}>
+                          Finalizar ronda
+                        </Button>
+                      </>
+                    )}
+                  </View>
+                </Surface>
+
+                <View style={styles.sectionBlock}>
+                  <Text style={styles.sectionKicker}>HISTORIAL DE RONDAS</Text>
+                  <Text style={styles.sectionTitle}>Tus recorridos registrados</Text>
+                </View>
+              </>
+            ) : activeTab !== 'perfil' ? (
               <>
                 <Surface style={styles.heroCard}>
                   <Text style={styles.heroKicker}>{activeTab === 'historial' ? 'HISTORIAL OPERATIVO' : 'CENTRO DE ALERTAS'}</Text>
@@ -851,9 +1012,9 @@ const GuardScreen = () => {
             )}
           </View>
         )}
-        ListEmptyComponent={activeTab === 'perfil' ? null : <Text style={styles.emptyText}>{activeTab === 'historial' ? 'No hay acciones tuyas en el historial' : 'No hay alertas activas'}</Text>}
+        ListEmptyComponent={activeTab === 'perfil' ? null : <Text style={styles.emptyText}>{activeTab === 'rondas' ? 'No tienes rondas registradas' : activeTab === 'historial' ? 'No hay acciones tuyas en el historial' : 'No hay alertas activas'}</Text>}
         contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
+        renderItem={({ item }) => activeTab === 'rondas' ? renderRoundCard({ item }) : (
           <TouchableOpacity activeOpacity={0.9} onPress={() => openIncidentMap(item)}>
             <Card style={[
               styles.card,
@@ -874,7 +1035,7 @@ const GuardScreen = () => {
                   {!!item.observation && activeTab === 'historial' && <Paragraph style={styles.cardObservation}>Observación: {item.observation}</Paragraph>}
                 </View>
               </View>
-              <Text style={[styles.motivoBadge, { borderColor: getIncidentByValue(item.motivoKey || item.motivo).color, color: getIncidentByValue(item.motivoKey || item.motivo).color }]}>{item.motivo.toUpperCase()}</Text>
+              <Text style={[styles.motivoBadge, { borderColor: getIncidentByValue(item.motivoKey || item.motivo, incidentCatalog).color, color: getIncidentByValue(item.motivoKey || item.motivo, incidentCatalog).color }]}>{item.motivo.toUpperCase()}</Text>
             </Card.Content>
 
             <Card.Actions style={styles.cardActions}>
@@ -1510,6 +1671,29 @@ const styles = StyleSheet.create({
   profileActions: {
     marginTop: 16,
     gap: 10,
+  },
+  roundPanel: {
+    marginTop: 14,
+    gap: 10,
+  },
+  roundPicker: {
+    minHeight: 52,
+    backgroundColor: '#f3f7ff',
+    borderRadius: 12,
+  },
+  roundTextInput: {
+    minHeight: 92,
+    borderWidth: 1,
+    borderColor: '#d8e1ef',
+    borderRadius: 12,
+    padding: 12,
+    color: '#0c1726',
+    backgroundColor: '#fff',
+    textAlignVertical: 'top',
+  },
+  roundButton: {
+    borderRadius: 12,
+    backgroundColor: '#4d82ff',
   },
 
   // MODAL STYLES (TA-09.2)

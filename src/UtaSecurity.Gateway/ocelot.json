@@ -37,6 +37,60 @@
       ]
     },
     {
+      "UpstreamPathTemplate": "/api/trust-groups/{everything}",
+      "UpstreamMethods": [ "Get", "Post", "Put", "Delete", "Options" ],
+      "DownstreamPathTemplate": "/api/trust-groups/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5003 }
+      ]
+    },
+    {
+      "UpstreamPathTemplate": "/api/trust-groups",
+      "UpstreamMethods": [ "Get", "Post", "Options" ],
+      "DownstreamPathTemplate": "/api/trust-groups",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5003 }
+      ]
+    },
+    {
+      "UpstreamPathTemplate": "/api/guard-rounds/{everything}",
+      "UpstreamMethods": [ "Get", "Post", "Put", "Delete", "Options" ],
+      "DownstreamPathTemplate": "/api/guard-rounds/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5003 }
+      ]
+    },
+    {
+      "UpstreamPathTemplate": "/api/guard-duty/{everything}",
+      "UpstreamMethods": [ "Get", "Post", "Put", "Delete", "Options" ],
+      "DownstreamPathTemplate": "/api/guard-duty/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5003 }
+      ]
+    },
+    {
+      "UpstreamPathTemplate": "/api/incident-types/{everything}",
+      "UpstreamMethods": [ "Get", "Post", "Put", "Delete", "Options" ],
+      "DownstreamPathTemplate": "/api/incident-types/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5003 }
+      ]
+    },
+    {
+      "UpstreamPathTemplate": "/api/incident-types",
+      "UpstreamMethods": [ "Get", "Post", "Options" ],
+      "DownstreamPathTemplate": "/api/incident-types",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        { "Host": "localhost", "Port": 5003 }
+      ]
+    },
+    {
       "UpstreamPathTemplate": "/api/zones/{everything}",
       "UpstreamMethods": [ "Get", "Options" ],
       "DownstreamPathTemplate": "/api/zones/{everything}",
