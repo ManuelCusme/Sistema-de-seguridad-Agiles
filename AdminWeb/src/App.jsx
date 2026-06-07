@@ -170,6 +170,9 @@ const motiveColors = {
   INCENDIO: '#ef4444',
 };
 
+const RECENT_INCIDENT_HIGHLIGHT_MS = 15000;
+const RECENT_INCIDENT_COLOR = '#ef4444';
+
 const motiveGlyphs = {
   ROBO: '🦹',
   AGRESIÓN: '🛡️',
@@ -179,13 +182,14 @@ const motiveGlyphs = {
   INCENDIO: '🔥',
 };
 
-const createMarkerIcon = (motive) => {
+const createMarkerIcon = (motive, status, isRecent = false) => {
   const normalized = String(motive || 'EMERGENCIA').toUpperCase();
-  const color = motiveColors[normalized] || '#4d82ff';
+  const isAssigned = normalizeStatus(status) === 'Asignado';
+  const color = isRecent ? RECENT_INCIDENT_COLOR : (isAssigned ? '#4d82ff' : (motiveColors[normalized] || '#4d82ff'));
   const glyph = motiveGlyphs[normalized] || '📍';
 
   return L.divIcon({
-    className: 'incident-marker',
+    className: `incident-marker ${isRecent ? 'incident-marker--recent' : ''}`,
     html: `
       <span class="incident-marker__chip" style="background:${color}22;color:${color}">
         <span class="incident-marker__glyph">${glyph}</span>
@@ -193,6 +197,17 @@ const createMarkerIcon = (motive) => {
     `,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
+  });
+};
+
+const createGuardMarkerIcon = (guardName) => {
+  const initial = String(guardName || 'G').trim().charAt(0).toUpperCase() || 'G';
+
+  return L.divIcon({
+    className: 'guard-marker',
+    html: `<span class="guard-marker__chip">${initial}</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
   });
 };
 
@@ -300,16 +315,16 @@ const getTimelineConfig = (range) => {
 };
 
 const dashboardReferenceNow = Date.now();
-const DEFAULT_OPEN_ZOOM = 17;
+const DEFAULT_OPEN_ZOOM = 16;
 const CAMPUS_CENTER = { lat: -1.2687, lng: -78.6247 };
 const MAP_OPTIONS = {
   zoomControl: true,
   scrollWheelZoom: true,
   doubleClickZoom: true,
-  dragging: false,
+  dragging: true,
   touchZoom: true,
-  boxZoom: false,
-  keyboard: false,
+  boxZoom: true,
+  keyboard: true,
 };
 
 function RecenterMap({ resetKey }) {
@@ -476,6 +491,9 @@ function App({ onLogout, session }) {
   const [query, setQuery] = useState('');
   const [activeCoords, setActiveCoords] = useState(null);
   const [alertsDrawerOpen, setAlertsDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mapFiltersOpen, setMapFiltersOpen] = useState(false);
+  const [mapGuardsOpen, setMapGuardsOpen] = useState(false);
   const [statsFilterOpen, setStatsFilterOpen] = useState(false);
   const [statsScope, setStatsScope] = useState('all');
   const [statsRange, setStatsRange] = useState('7D');
@@ -490,6 +508,9 @@ function App({ onLogout, session }) {
   const [closeModalVisible, setCloseModalVisible] = useState(false);
   const [toast, setToast] = useState(null);
   const [userLookup, setUserLookup] = useState({});
+  const [guardLocations, setGuardLocations] = useState({});
+  const [recentIncidentIds, setRecentIncidentIds] = useState({});
+  const recentIncidentTimersRef = useRef({});
 
   const showToast = (message, tone = 'success') => {
     setToast({ message, tone });
@@ -592,6 +613,22 @@ function App({ onLogout, session }) {
     setAlertsDrawerOpen(false);
   };
 
+  const markIncidentAsRecent = (incidentId) => {
+    if (!incidentId) return;
+
+    window.clearTimeout(recentIncidentTimersRef.current[incidentId]);
+    setRecentIncidentIds((prev) => ({ ...prev, [incidentId]: true }));
+
+    recentIncidentTimersRef.current[incidentId] = window.setTimeout(() => {
+      setRecentIncidentIds((prev) => {
+        const next = { ...prev };
+        delete next[incidentId];
+        return next;
+      });
+      delete recentIncidentTimersRef.current[incidentId];
+    }, RECENT_INCIDENT_HIGHLIGHT_MS);
+  };
+
   useEffect(() => {
     const loadUsers = async () => {
       try {
@@ -631,6 +668,8 @@ function App({ onLogout, session }) {
           time: formatRelativeTime(item.incFechaReporte),
           timestamp: parseBackendDate(item.incFechaReporte) || new Date(),
           pos: { lat: item.incLatitud, lng: item.incLongitud },
+          assignedBy: item.incAsignadoPor || null,
+          assignedAt: parseBackendDate(item.incAsignadoEn),
           closedBy: item.incCerradoPor || null,
           closedAt: parseBackendDate(item.incCerradoEn),
           observation: item.incObservacion || '',
@@ -671,10 +710,16 @@ function App({ onLogout, session }) {
         pos: { lat: incident.incLatitud, lng: incident.incLongitud },
         closedBy: null,
         closedAt: null,
+        assignedBy: null,
+        assignedAt: null,
         observation: '',
       };
 
       setAlerts((prev) => [nextIncident, ...prev]);
+      markIncidentAsRecent(nextIncident.id);
+      setView('mapa');
+      setAlertsDrawerOpen(true);
+      setActiveCoords(nextIncident.pos);
 
       if (audioRef.current) {
         audioRef.current.play().catch(() => {});
@@ -692,10 +737,37 @@ function App({ onLogout, session }) {
           ...item,
           status: nextStatus,
           zone: normalizeZoneLabel(incident.incZona || item.zone, incident.incGeocercaNombre || item.zone),
-          closedBy: incident.incCerradoPor || item.closedBy || incident.incAsignadoPor || null,
+          assignedBy: incident.incAsignadoPor || item.assignedBy || null,
+          assignedAt: parseBackendDate(incident.incAsignadoEn) || item.assignedAt,
+          closedBy: incident.incCerradoPor || item.closedBy || null,
           closedAt: parseBackendDate(incident.incCerradoEn) || item.closedAt,
           observation: incident.incObservacion || item.observation,
         };
+      }));
+    });
+
+    connection.on('ReceiveGuardLocation', (location) => {
+      const guardId = String(location?.guardId || location?.GuardId || '').trim();
+      const latitude = Number(location?.latitude ?? location?.Latitude);
+      const longitude = Number(location?.longitude ?? location?.Longitude);
+
+      if (!guardId || Number.isNaN(latitude) || Number.isNaN(longitude)) {
+        return;
+      }
+
+      const incidentId = location?.incidentId ?? location?.IncidentId ?? null;
+
+      setGuardLocations((prev) => ({
+        ...prev,
+        [guardId.toLowerCase()]: {
+          id: guardId,
+          name: location?.guardName || location?.GuardName || guardId || 'Guardia',
+          pos: { lat: latitude, lng: longitude },
+          incidentId,
+          incidentStatus: location?.incidentStatus || location?.IncidentStatus || null,
+          incidentMotivo: location?.incidentMotivo || location?.IncidentMotivo || null,
+          updatedAt: parseBackendDate(location?.updatedAt || location?.UpdatedAt) || new Date(),
+        },
       }));
     });
 
@@ -703,8 +775,13 @@ function App({ onLogout, session }) {
       .then(() => setConnected(true))
       .catch(() => setConnected(false));
 
-    return () => connection.stop();
+    return () => {
+      Object.values(recentIncidentTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+      connection.stop();
+    };
   }, []);
+
+  const activeGuards = useMemo(() => Object.values(guardLocations), [guardLocations]);
 
   const rangeFilteredAlerts = useMemo(() => {
     const limitMs = getRangeLimitMs(statsRange);
@@ -741,13 +818,6 @@ function App({ onLogout, session }) {
 
     return { active, assigned, closed, avgResponse };
   }, [alerts]);
-
-  const summaryStats = useMemo(() => ({
-    total: filteredAlerts.length,
-    active: filteredAlerts.filter((item) => item.status === 'Activo').length,
-    assigned: filteredAlerts.filter((item) => item.status === 'Asignado').length,
-    closed: filteredAlerts.filter((item) => item.status === 'Cerrado').length,
-  }), [filteredAlerts]);
 
   const statsRangeAlerts = useMemo(() => {
     const limitMs = getRangeLimitMs(statsRange);
@@ -872,10 +942,13 @@ function App({ onLogout, session }) {
   }, [query, filterZone, filterMotivo, statsRange]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''}`}>
       <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" />
 
       <aside className="sidebar">
+        <button className="sidebar-toggle sidebar-toggle--inside" type="button" onClick={() => setSidebarCollapsed(true)}>
+          Cerrar panel
+        </button>
         <div className="brand">
           <div className="brand__mark">UTA</div>
           <div>
@@ -896,69 +969,64 @@ function App({ onLogout, session }) {
           <span>En línea</span>
           <strong>{connected ? 'SignalR activo' : 'Conectando...'}</strong>
         </div>
+
+        {onLogout && (
+          <div className="sidebar__footer">
+            <div className="user-chip user-chip--sidebar" title={`${session?.role || 'Sin rol'} · ${session?.email || ''}`}>
+              <span className="user-chip__avatar">{(session?.displayName || 'A').charAt(0).toUpperCase()}</span>
+              <div>
+                <strong>{session?.displayName || 'Usuario'}</strong>
+                <span>{session?.role || 'Admin'}</span>
+              </div>
+            </div>
+            <button className="sidebar-logout" type="button" onClick={onLogout} title="Cerrar sesión">Cerrar sesión</button>
+          </div>
+        )}
       </aside>
 
       <main className="workspace">
-        <header className="topbar">
+        {sidebarCollapsed && (
+          <button className="sidebar-toggle sidebar-toggle--floating" type="button" onClick={() => setSidebarCollapsed(false)}>
+            Abrir panel
+          </button>
+        )}
+        <header className={`topbar ${view === 'mapa' ? 'topbar--map' : ''}`}>
           <div>
             <h2>{view === 'mapa' ? 'Mapa operacional' : 'Estadísticas del campus'}</h2>
-            <p>{view === 'mapa' ? 'Zonas, filtros e incidencias en tiempo real' : 'Resumen, tendencias y distribución de incidentes'}</p>
+            {view !== 'mapa' && <p>Resumen, tendencias y distribución de incidentes</p>}
           </div>
 
           <div className="topbar__actions">
-            {onLogout && (
-              <div className="user-chip" title={`${session?.role || 'Sin rol'} · ${session?.email || ''}`}>
-                <span className="user-chip__avatar">{(session?.displayName || 'A').charAt(0).toUpperCase()}</span>
-                <div>
-                  <strong>{session?.displayName || 'Usuario'}</strong>
-                  <span>{session?.role || 'Admin'}</span>
-                </div>
-              </div>
-            )}
             <label className="searchbox">
               <Search size={16} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar..." />
             </label>
+            {view === 'mapa' && (
+              <button className="ghost-btn" type="button" onClick={() => setMapFiltersOpen((value) => !value)}>
+                <Filter size={16} />
+                Filtros
+              </button>
+            )}
+            {view === 'mapa' && (
+              <button className="ghost-btn" type="button" onClick={() => setMapGuardsOpen((value) => !value)}>
+                <ShieldAlert size={16} />
+                Guardias
+              </button>
+            )}
             <button className="ghost-btn" type="button" onClick={() => setAlertsDrawerOpen((value) => !value)}>
               <Bell size={16} />
-              Alertas
+              Incidencias
             </button>
-            {onLogout && <button className="ghost-btn" type="button" onClick={onLogout} title="Cerrar sesión">Cerrar sesión</button>}
           </div>
         </header>
 
         {view === 'mapa' && (
           <section className="layout layout--map">
-            <div className="summary-grid">
-              <StatCard title="Incidentes visibles" value={summaryStats.total} detail={`Activos: ${summaryStats.active} · Asignados: ${summaryStats.assigned}`} tone="accent" />
-              <StatCard title="Respuesta media" value={stats.avgResponse} detail="Según el filtro activo" />
-              <StatCard title="Casos cerrados" value={summaryStats.closed} detail="Historial filtrado" />
-              <StatCard title="Zonas vigiladas" value="4" detail="Campus Huachi" tone="soft" />
-            </div>
-
-            <div className="content-grid">
-              <section className="panel panel--map">
-                <div className="panel__header">
-                  <div>
-                    <h3>Mapa del campus</h3>
-                    <p>Polígonos, zonas y marcador de incidentes activos</p>
-                  </div>
-                  <div className="legend">
-                    {zones.map((zone) => (
-                      <span key={zone.id}><i style={{ background: zone.color }} /> {zone.label}</span>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" className="ghost-btn ghost-btn--small" onClick={() => {
-                      setActiveCoords(null);
-                      setMapResetKey((k) => k + 1);
-                    }}>Recentrar mapa</button>
-                  </div>
-                </div>
-
+            <div className="map-workspace">
+              <section className="panel panel--map panel--map-focus">
                 <div className="map-shell">
-                    <MapContainer center={[CAMPUS_CENTER.lat, CAMPUS_CENTER.lng]} zoom={DEFAULT_OPEN_ZOOM} className="map" {...MAP_OPTIONS}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <MapContainer center={[CAMPUS_CENTER.lat, CAMPUS_CENTER.lng]} zoom={DEFAULT_OPEN_ZOOM} maxZoom={18} wheelPxPerZoomLevel={90} className="map" {...MAP_OPTIONS}>
+                    <TileLayer maxZoom={18} maxNativeZoom={18} url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                       <RecenterMap resetKey={mapResetKey} />
                       {activeCoords && <FocusMap coords={activeCoords} />}
 
@@ -970,16 +1038,35 @@ function App({ onLogout, session }) {
                       </Polygon>
                     ))}
 
-                    {filteredAlerts.map((alert) => (
-                      <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]} icon={createMarkerIcon(alert.motivo)}>
+                    {filteredAlerts.map((alert) => {
+                      const isRecent = Boolean(recentIncidentIds[alert.id]);
+
+                      return (
+                        <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]} icon={createMarkerIcon(alert.motivo, alert.status, isRecent)}>
+                          <Popup>
+                            <div className="popup-card">
+                              <div className="popup-card__header">
+                                <IncidentIcon motive={alert.motivo} />
+                                <strong>{alert.motivo}</strong>
+                              </div>
+                              <p>{alert.user}</p>
+                              <span>{alert.zone}</span>
+                            </div>
+                          </Popup>
+                        </Marker>
+                      );
+                    })}
+
+                    {activeGuards.map((guard) => (
+                      <Marker key={guard.id} position={[guard.pos.lat, guard.pos.lng]} icon={createGuardMarkerIcon(guard.name)}>
                         <Popup>
                           <div className="popup-card">
                             <div className="popup-card__header">
-                              <IncidentIcon motive={alert.motivo} />
-                              <strong>{alert.motivo}</strong>
+                              <span className="guard-popup-icon">G</span>
+                              <strong>{guard.name}</strong>
                             </div>
-                            <p>{alert.user}</p>
-                            <span>{alert.zone}</span>
+                            <p>Incidencia activa: {guard.incidentId || 'Sin asignación reportada'}</p>
+                            <span>{guard.incidentMotivo || guard.incidentStatus || 'Seguimiento en vivo'}</span>
                           </div>
                         </Popup>
                       </Marker>
@@ -988,17 +1075,27 @@ function App({ onLogout, session }) {
                 </div>
               </section>
 
-              <aside className="panel panel--side">
-                <div className="panel__header panel__header--stacked">
-                  <div>
-                    <h3>Filtros</h3>
-                    <p>Refina por zona, tipo y búsqueda</p>
-                  </div>
-                  <div className="filter-badge">
-                    <Filter size={14} /> Activos
-                  </div>
+              <div className="map-floating map-floating--legend">
+                <div className="legend">
+                  {zones.map((zone) => (
+                    <span key={zone.id}><i style={{ background: zone.color }} /> {zone.label}</span>
+                  ))}
                 </div>
+                <button type="button" className="ghost-btn ghost-btn--small" onClick={() => {
+                  setActiveCoords(null);
+                  setMapResetKey((k) => k + 1);
+                }}>Recentrar mapa</button>
+              </div>
 
+              {mapFiltersOpen && (
+                <div className="map-floating map-floating--filters">
+                  <div className="map-floating__header">
+                    <strong>Filtros</strong>
+                    <button type="button" onClick={() => setMapFiltersOpen(false)}>Cerrar</button>
+                  </div>
+                  <button type="button" className="filter-reset-btn" onClick={clearFilters}>
+                    Todo por defecto
+                  </button>
                 <div className="filters">
                   <label>
                     Zona
@@ -1022,15 +1119,49 @@ function App({ onLogout, session }) {
                     </select>
                   </label>
                 </div>
+                </div>
+              )}
 
-                <div className="incident-list">
+              {mapGuardsOpen && (
+              <div className="map-floating map-floating--guards">
+                <div className="map-floating__header">
+                  <strong>Guardias activos</strong>
+                  <button type="button" onClick={() => setMapGuardsOpen(false)}>Cerrar</button>
+                </div>
+                <div className="guard-list">
                   <div className="incident-list__header">
-                    <h3>Incidencias recientes</h3>
+                    <h3>En mapa</h3>
+                    <span>{activeGuards.length}</span>
+                  </div>
+                  {activeGuards.map((guard) => (
+                    <article key={guard.id} className="guard-card">
+                      <span className="guard-card__avatar">{guard.name.charAt(0).toUpperCase()}</span>
+                      <div>
+                        <strong>{guard.name}</strong>
+                        <p>{guard.incidentId ? `Atiende ${guard.incidentId}` : 'Disponible / sin incidencia activa'}</p>
+                        <small>{formatRelativeTime(guard.updatedAt)}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {activeGuards.length === 0 && <p className="empty-state">Aún no hay guardias reportando ubicación.</p>}
+                </div>
+              </div>
+              )}
+
+              {alertsDrawerOpen && (
+                <div className="map-floating map-floating--incidents">
+                  <div className="map-floating__header">
+                    <strong>Incidencias</strong>
+                    <button type="button" onClick={() => setAlertsDrawerOpen(false)}>Cerrar</button>
+                  </div>
+                <div className="incident-list incident-list--floating">
+                  <div className="incident-list__header">
+                    <h3>Recientes</h3>
                     <span>{filteredAlerts.length}</span>
                   </div>
 
-                  {filteredAlerts.map((alert) => (
-                    <article key={alert.id} className="incident-card" onClick={() => focusAlert(alert)}>
+                  {filteredAlerts.slice(0, 12).map((alert) => (
+                    <article key={alert.id} className={`incident-card ${alert.status === 'Asignado' ? 'incident-card--assigned' : ''} ${recentIncidentIds[alert.id] ? 'incident-card--recent' : ''}`} onClick={() => focusAlert(alert)}>
                       <div className="incident-card__top">
                         <span className="incident-card__tag">
                           <IncidentIcon motive={alert.motivo} />
@@ -1040,6 +1171,9 @@ function App({ onLogout, session }) {
                       </div>
                       <strong>{alert.user}</strong>
                       <p>{alert.faculty} · {alert.zone}</p>
+                      <p className={alert.assignedBy ? 'incident-card__assigned-guard' : ''}>
+                        Guardia asignado: {alert.assignedBy ? resolveUserName(alert.assignedBy) : 'Sin asignar'}
+                      </p>
                       <div className="incident-card__footer">
                         <small>{alert.time}</small>
                         <button type="button" className="incident-card__dismiss" onClick={(e) => {
@@ -1055,7 +1189,8 @@ function App({ onLogout, session }) {
                   {loadingIncidents && <p className="empty-state">Cargando incidencias reales...</p>}
                   {!loadingIncidents && filteredAlerts.length === 0 && <p className="empty-state">No hay incidencias que coincidan con los filtros.</p>}
                 </div>
-              </aside>
+                </div>
+              )}
             </div>
           </section>
         )
@@ -1122,9 +1257,9 @@ function App({ onLogout, session }) {
           <section className="layout layout--stats">
             <div className="summary-grid">
               <StatCard title="Total incidentes" value={statsAlerts.length} detail={statsScope === 'active' ? 'Solo casos abiertos' : 'Incluye cerrados y asignados'} tone="accent" />
-              <StatCard title="Casos activos" value={statsAlerts.filter((item) => item.status === 'Activo').length} detail="Siguen abiertos" />
+              <StatCard title="Respuesta media" value={stats.avgResponse} detail="Según el rango seleccionado" />
               <StatCard title="Casos cerrados" value={statsAlerts.filter((item) => item.status === 'Cerrado').length} detail="Con seguimiento completo" />
-              <StatCard title="Guardias en línea" value="7" detail="Conectados al sistema" tone="soft" />
+              <StatCard title="Guardias en línea" value={activeGuards.length} detail="Reportando ubicación en vivo" tone="soft" />
             </div>
 
             <div className="stats-toolbar">
@@ -1168,6 +1303,9 @@ function App({ onLogout, session }) {
 
             {statsFilterOpen && (
               <div className="stats-filters-panel">
+                <button type="button" className="filter-reset-btn filter-reset-btn--wide" onClick={clearFilters}>
+                  Todo por defecto
+                </button>
                 <label>
                   Tipo
                   <select value={filterMotivo} onChange={(e) => setFilterMotivo(e.target.value)}>
@@ -1307,7 +1445,7 @@ function App({ onLogout, session }) {
           </div>
         )}
 
-        {alertsDrawerOpen && (
+        {alertsDrawerOpen && view !== 'mapa' && (
           <aside className="alerts-drawer">
             <div className="alerts-drawer__header">
               <div>

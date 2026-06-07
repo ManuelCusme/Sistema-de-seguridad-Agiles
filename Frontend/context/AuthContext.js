@@ -1,14 +1,12 @@
 import React, { createContext, useState, useContext } from 'react';
 import axios from 'axios';
+import { API_URL } from '../config/network';
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
-
-  // IMPORTANTE: Usa tu IP local (192.168.0.5) para que el celular encuentre el servidor
-  const API_URL = 'http://192.168.0.5:5000/api';
 
   const login = async (email, password) => {
     try {
