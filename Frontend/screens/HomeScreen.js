@@ -8,14 +8,18 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
+  TextInput,
+  Alert,
 } from 'react-native';
 import { Text, Surface, Headline, IconButton, Button } from 'react-native-paper';
 import * as Location from 'expo-location';
 import axios from 'axios';
+import * as signalR from '@microsoft/signalr';
 import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
-import { INCIDENT_CATALOG, INCIDENT_DEFAULT, getIncidentByValue } from '../constants/incidentCatalog';
+import { INCIDENT_CATALOG, INCIDENT_DEFAULT, getIncidentByValue, mapIncidentTypesFromApi } from '../constants/incidentCatalog';
+import { ALERTS_HUB_URL } from '../config/network';
 
 const DRAWER_WIDTH = 236;
 const GUAYAQUIL_OFFSET_MS = 5 * 60 * 60 * 1000;
@@ -55,12 +59,19 @@ const HomeScreen = () => {
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [userDirectory, setUserDirectory] = useState({});
+  const [incidentCatalog, setIncidentCatalog] = useState(INCIDENT_CATALOG);
+  const [trustGroups, setTrustGroups] = useState([]);
+  const [trustGroupName, setTrustGroupName] = useState('');
+  const [trustMemberInput, setTrustMemberInput] = useState('');
+  const [selectedTrustGroupId, setSelectedTrustGroupId] = useState('');
+  const [trustLoading, setTrustLoading] = useState(false);
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
   const drawerTranslateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const drawerBackdrop = useRef(new Animated.Value(0)).current;
   const timerRef = useRef(null);
+  const trustConnectionRef = useRef(null);
 
   const myUserId = String(user?.id || user?.Id || '');
 
@@ -70,8 +81,48 @@ const HomeScreen = () => {
     }
 
     loadUsers();
+    loadIncidentTypes();
+    loadTrustGroups();
     loadHistory();
   }, [token]);
+
+  useEffect(() => {
+    if (!myUserId) {
+      return undefined;
+    }
+
+    const separator = ALERTS_HUB_URL.includes('?') ? '&' : '?';
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(`${ALERTS_HUB_URL}${separator}userId=${encodeURIComponent(myUserId)}&role=Estudiante`)
+      .withAutomaticReconnect()
+      .build();
+
+    trustConnectionRef.current = connection;
+
+    connection.on('ReceiveAlert', (incident) => {
+      if (!incident?.incId || String(incident.incUsuarioId || '') === myUserId) {
+        return;
+      }
+
+      const catalogItem = getIncidentByValue(incident.incMotivo, incidentCatalog);
+      Alert.alert(
+        'Alerta de tu grupo de confianza',
+        `${incident.incReportadoPor || 'Un estudiante'} activó ${catalogItem.label} en ${incident.incZona || 'zona no disponible'}.`
+      );
+    });
+
+    connection.start().catch((error) => {
+      console.error('No se pudo conectar a alertas de confianza:', error.message);
+    });
+
+    return () => {
+      trustConnectionRef.current = null;
+      connection.off('ReceiveAlert');
+      if (connection.state === signalR.HubConnectionState.Connected) {
+        connection.stop().catch(() => {});
+      }
+    };
+  }, [myUserId, incidentCatalog]);
 
   const openDrawer = () => {
     setDrawerVisible(true);
@@ -181,6 +232,83 @@ const HomeScreen = () => {
     }
   };
 
+  const loadIncidentTypes = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/incident-types`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const catalog = mapIncidentTypesFromApi(response.data);
+      setIncidentCatalog(catalog);
+      setMotivo((current) => (catalog.some((item) => item.value === current) ? current : (catalog[0]?.value || INCIDENT_DEFAULT.value)));
+    } catch (error) {
+      console.error('No se pudieron cargar tipos de incidente:', error.message);
+      setIncidentCatalog(INCIDENT_CATALOG);
+    }
+  };
+
+  const loadTrustGroups = async () => {
+    if (!myUserId) {
+      return;
+    }
+
+    setTrustLoading(true);
+    try {
+      const response = await axios.get(`${API_URL}/trust-groups`, {
+        params: { usuId: myUserId },
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const groups = Array.isArray(response.data) ? response.data : [];
+      setTrustGroups(groups);
+      setSelectedTrustGroupId((current) => current || groups[0]?.id || '');
+    } catch (error) {
+      console.error('No se pudieron cargar grupos de confianza:', error.message);
+    } finally {
+      setTrustLoading(false);
+    }
+  };
+
+  const createTrustGroup = async () => {
+    if (!trustGroupName.trim() || !myUserId) {
+      return;
+    }
+
+    setTrustLoading(true);
+    try {
+      await axios.post(`${API_URL}/trust-groups`, {
+        usuId: myUserId,
+        nombre: trustGroupName.trim(),
+      });
+      setTrustGroupName('');
+      await loadTrustGroups();
+    } catch (error) {
+      console.error('No se pudo crear el grupo:', error.message);
+    } finally {
+      setTrustLoading(false);
+    }
+  };
+
+  const addTrustMember = async () => {
+    if (!selectedTrustGroupId || !trustMemberInput.trim() || !myUserId) {
+      return;
+    }
+
+    const value = trustMemberInput.trim();
+    setTrustLoading(true);
+    try {
+      await axios.post(`${API_URL}/trust-groups/${selectedTrustGroupId}/members`, {
+        usuId: myUserId,
+        memberEmail: value.includes('@') ? value : '',
+        memberUserId: value.includes('@') ? '' : value,
+      });
+      setTrustMemberInput('');
+      await loadTrustGroups();
+    } catch (error) {
+      console.error('No se pudo agregar miembro:', error.message);
+    } finally {
+      setTrustLoading(false);
+    }
+  };
+
   const resolveUserName = (userId, isClosed = false) => {
     const normalizedId = normalizeUserId(userId);
     if (!normalizedId) {
@@ -277,7 +405,7 @@ const HomeScreen = () => {
   };
 
   const renderAlertView = () => {
-    const selectedIncident = getIncidentByValue(motivo);
+    const selectedIncident = getIncidentByValue(motivo, incidentCatalog);
 
     return (
       <View style={styles.sectionCard}>
@@ -292,7 +420,7 @@ const HomeScreen = () => {
             onValueChange={(itemValue) => setMotivo(itemValue)}
             style={styles.picker}
           >
-            {INCIDENT_CATALOG.map((item) => (
+            {incidentCatalog.map((item) => (
               <Picker.Item key={item.value} label={`${item.emoji} ${item.label}`} value={item.value} />
             ))}
           </Picker>
@@ -343,7 +471,7 @@ const HomeScreen = () => {
   };
 
   const renderHistoryItem = (item) => {
-    const incident = getIncidentByValue(item.incMotivo);
+    const incident = getIncidentByValue(item.incMotivo, incidentCatalog);
     const isSelected = selectedHistory?.incId === item.incId;
     const status = item.incEstado || item.incSeveridad || 'PENDIENTE';
 
@@ -393,7 +521,7 @@ const HomeScreen = () => {
 
   const renderHistoryView = () => {
     const selectedIncident = selectedHistory || history[0] || null;
-    const selectedCatalog = selectedIncident ? getIncidentByValue(selectedIncident.incMotivo) : null;
+    const selectedCatalog = selectedIncident ? getIncidentByValue(selectedIncident.incMotivo, incidentCatalog) : null;
 
     return (
       <View style={styles.sectionCard}>
@@ -445,7 +573,7 @@ const HomeScreen = () => {
       return null;
     }
 
-    const selectedCatalog = getIncidentByValue(selectedHistory.incMotivo);
+    const selectedCatalog = getIncidentByValue(selectedHistory.incMotivo, incidentCatalog);
     const status = selectedHistory.incEstado || selectedHistory.incSeveridad || 'PENDIENTE';
 
     return (
@@ -572,6 +700,18 @@ const HomeScreen = () => {
             <Text style={styles.drawerLabel}>Historial</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={[styles.drawerItem, activeSection === 'trust' && styles.drawerItemActive]}
+            onPress={() => {
+              setActiveSection('trust');
+              closeDrawer();
+              loadTrustGroups();
+            }}
+          >
+            <Text style={styles.drawerIcon}>👥</Text>
+            <Text style={styles.drawerLabel}>Confianza</Text>
+          </TouchableOpacity>
+
           <View style={styles.drawerHintWrap}>
             <Text style={styles.drawerHint}>
               Este menú se oculta automáticamente al seleccionar una sección.
@@ -586,6 +726,73 @@ const HomeScreen = () => {
       </View>
     );
   };
+
+  const renderTrustGroupsView = () => (
+    <View style={styles.sectionCard}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionKicker}>GRUPOS DE CONFIANZA</Text>
+        <Text style={styles.label}>Contactos que recibirán tu alerta</Text>
+      </View>
+
+      <Surface style={styles.formPanel}>
+        <TextInput
+          style={styles.textInput}
+          placeholder="Nombre del grupo"
+          value={trustGroupName}
+          onChangeText={setTrustGroupName}
+        />
+        <Button mode="contained" onPress={createTrustGroup} disabled={trustLoading || !trustGroupName.trim()} style={styles.formButton}>
+          Crear grupo
+        </Button>
+      </Surface>
+
+      {trustGroups.length > 0 ? (
+        <Surface style={styles.formPanel}>
+          <Picker selectedValue={selectedTrustGroupId} onValueChange={setSelectedTrustGroupId} style={styles.picker}>
+            {trustGroups.map((group) => (
+              <Picker.Item key={group.id} label={group.nombre} value={group.id} />
+            ))}
+          </Picker>
+          <TextInput
+            style={styles.textInput}
+            placeholder="Correo o ID del usuario"
+            value={trustMemberInput}
+            autoCapitalize="none"
+            onChangeText={setTrustMemberInput}
+          />
+          <Button mode="contained" onPress={addTrustMember} disabled={trustLoading || !trustMemberInput.trim()} style={styles.formButton}>
+            Agregar miembro
+          </Button>
+        </Surface>
+      ) : null}
+
+      {trustLoading ? <ActivityIndicator color="#4d82ff" /> : null}
+
+      {trustGroups.length === 0 && !trustLoading ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>Aún no tienes grupos</Text>
+          <Text style={styles.emptyText}>Crea un grupo y agrega usuarios por correo institucional o ID.</Text>
+        </View>
+      ) : (
+        <View style={styles.historyList}>
+          {trustGroups.map((group) => (
+            <Surface key={group.id} style={styles.historyItem}>
+              <Text style={styles.historyItemTitle}>{group.nombre}</Text>
+              {(group.miembros || []).length === 0 ? (
+                <Text style={styles.historyItemMeta}>Sin miembros agregados todavía.</Text>
+              ) : (
+                (group.miembros || []).map((member) => (
+                  <Text key={member.id} style={styles.historyItemMeta}>
+                    {member.nombre} · {member.email || member.usuId}
+                  </Text>
+                ))
+              )}
+            </Surface>
+          ))}
+        </View>
+      )}
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -625,7 +832,7 @@ const HomeScreen = () => {
               : undefined
           }
         >
-          {activeSection === 'history' ? renderHistoryView() : renderAlertView()}
+          {activeSection === 'history' ? renderHistoryView() : activeSection === 'trust' ? renderTrustGroupsView() : renderAlertView()}
         </ScrollView>
       </View>
 
@@ -712,6 +919,27 @@ const styles = StyleSheet.create({
   picker: {
     height: 60,
     width: '100%',
+  },
+  formPanel: {
+    width: '100%',
+    borderRadius: 18,
+    backgroundColor: 'white',
+    elevation: 2,
+    padding: 14,
+    gap: 10,
+  },
+  textInput: {
+    minHeight: 46,
+    borderWidth: 1,
+    borderColor: '#d8e1ef',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    color: '#0c1726',
+    backgroundColor: '#fff',
+  },
+  formButton: {
+    borderRadius: 12,
+    backgroundColor: '#4d82ff',
   },
   selectedChipRow: {
     alignItems: 'center',
