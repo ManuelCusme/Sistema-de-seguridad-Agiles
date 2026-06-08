@@ -13,6 +13,8 @@ using UtaSecurity.Services.Incidents.Hubs;
 using UtaSecurity.Services.Incidents.Models;
 using UtaSecurity.Services.Incidents.Data;
 using UtaSecurity.Services.Incidents.Services;
+using System.Globalization;
+using System.Text;
 
 namespace UtaSecurity.Services.Incidents.Controllers
 {
@@ -66,6 +68,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
             objNuevaAlerta.incFechaReporte = DateTime.UtcNow;
 
             string zonaDetectada = "No disponible";
+            string geocercaDetectada = objNuevaAlerta.incGeocercaNombre;
 
             if (objNuevaAlerta.incLatitud == 0 && objNuevaAlerta.incLongitud == 0)
             {
@@ -86,6 +89,10 @@ namespace UtaSecurity.Services.Incidents.Controllers
                         {
                             // Limpiar comillas y espacios en caso de que la respuesta sea un string JSON ("Campus Huachi" -> Campus Huachi)
                             zonaDetectada = result.Trim('"', ' ', '\n', '\r');
+                            if (!IsUnknownZone(zonaDetectada))
+                            {
+                                geocercaDetectada = zonaDetectada;
+                            }
                         }
                     }
                     else
@@ -99,7 +106,9 @@ namespace UtaSecurity.Services.Incidents.Controllers
                 }
             }
 
+            zonaDetectada = NormalizeZoneLabel(zonaDetectada, geocercaDetectada, objNuevaAlerta.incLatitud, objNuevaAlerta.incLongitud);
             objNuevaAlerta.incZona = zonaDetectada;
+            objNuevaAlerta.incGeocercaNombre = string.IsNullOrWhiteSpace(geocercaDetectada) ? zonaDetectada : geocercaDetectada;
 
             // HU-10/HU-12: enviar a administradores, guardias en servicio y miembros de confianza.
             var notificationGroups = await GetIncidentNotificationGroupsAsync(usuId);
@@ -189,14 +198,17 @@ namespace UtaSecurity.Services.Incidents.Controllers
         [HttpGet]
         public async Task<IActionResult> GetIncidents()
         {
-            var incidents = await _context.Incidents
+            var incidentEntities = await _context.Incidents
                 .OrderByDescending(item => item.Timestamp)
+                .ToListAsync();
+
+            var incidents = incidentEntities
                 .Select(item => new
                 {
                     incId = item.Id.ToString(),
                     incUsuarioId = item.UserId,
                     incMotivo = item.Motivo,
-                    incZona = item.Zona,
+                    incZona = NormalizeZoneLabel(item.Zona, item.GeofenceName, item.Latitude, item.Longitude),
                     incGeocercaNombre = item.GeofenceName,
                     incReportadoPor = "Usuario institucional",
                     incFacultad = "UTA",
@@ -211,7 +223,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
                     incCerradoEn = item.ClosedAt,
                     incObservacion = item.CloseObservation
                 })
-                .ToListAsync();
+                .ToList();
 
             return Ok(incidents);
         }
@@ -241,13 +253,15 @@ namespace UtaSecurity.Services.Incidents.Controllers
 
             await _context.SaveChangesAsync();
 
+            var zonaNormalizada = NormalizeZoneLabel(incident.Zona, incident.GeofenceName, incident.Latitude, incident.Longitude);
+
             await _hubContext.Clients.All.SendAsync("ReceiveIncidentUpdate", new
             {
                 incId = incident.Id.ToString(),
                 incEstado = incident.Status,
                 incAsignadoPor = incident.AssignedByUserId?.ToString(),
                 incAsignadoEn = incident.AssignedAt,
-                incZona = incident.Zona,
+                incZona = zonaNormalizada,
                 incGeocercaNombre = incident.GeofenceName,
                 incObservacion = incident.CloseObservation
             });
@@ -292,6 +306,8 @@ namespace UtaSecurity.Services.Incidents.Controllers
 
             await _context.SaveChangesAsync();
 
+            var zonaNormalizada = NormalizeZoneLabel(incident.Zona, incident.GeofenceName, incident.Latitude, incident.Longitude);
+
             await _hubContext.Clients.All.SendAsync("ReceiveIncidentUpdate", new
             {
                 incId = incident.Id.ToString(),
@@ -300,7 +316,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
                 incCerradoEn = incident.ClosedAt,
                 incAsignadoPor = incident.AssignedByUserId?.ToString(),
                 incAsignadoEn = incident.AssignedAt,
-                incZona = incident.Zona,
+                incZona = zonaNormalizada,
                 incGeocercaNombre = incident.GeofenceName,
                 incObservacion = incident.CloseObservation
             });
@@ -318,6 +334,129 @@ namespace UtaSecurity.Services.Incidents.Controllers
                     incObservacion = incident.CloseObservation
                 }
             });
+        }
+
+        private sealed record ZoneShape(string Label, string[] Hints, (double Lat, double Lng)[] Points);
+
+        private static readonly ZoneShape[] CampusZones =
+        [
+            new("Zona 1", ["Z1", "ZONA 1", "INGEN"], [
+                (-1.266416, -78.625301),
+                (-1.266480, -78.624212),
+                (-1.268564, -78.624212),
+                (-1.268564, -78.625840)
+            ]),
+            new("Zona 2", ["Z2", "ZONA 2", "BIBLI"], [
+                (-1.266480, -78.624212),
+                (-1.266555, -78.622994),
+                (-1.268564, -78.622640),
+                (-1.268564, -78.624212)
+            ]),
+            new("Zona 3", ["Z3", "ZONA 3", "RECTOR", "ADMIN"], [
+                (-1.268564, -78.625840),
+                (-1.268564, -78.624212),
+                (-1.270650, -78.624212),
+                (-1.270376, -78.626380)
+            ]),
+            new("Zona 4", ["Z4", "ZONA 4", "DEPOR"], [
+                (-1.268564, -78.624212),
+                (-1.268564, -78.622640),
+                (-1.270935, -78.622289),
+                (-1.270650, -78.624212)
+            ])
+        ];
+
+        private static string NormalizeZoneLabel(string? zone, string? geofence, double latitude, double longitude)
+        {
+            var fromText = ZoneFromText(zone) ?? ZoneFromText(geofence);
+            if (!string.IsNullOrWhiteSpace(fromText))
+            {
+                return fromText;
+            }
+
+            var fromCoordinates = ZoneFromCoordinates(latitude, longitude);
+            if (!string.IsNullOrWhiteSpace(fromCoordinates))
+            {
+                return fromCoordinates;
+            }
+
+            return string.IsNullOrWhiteSpace(zone) ? "No disponible" : zone;
+        }
+
+        private static string? ZoneFromText(string? value)
+        {
+            var text = NormalizeSearchText(value);
+            if (string.IsNullOrWhiteSpace(text) || text is "NO DISPONIBLE" or "UBICACION DESCONOCIDA")
+            {
+                return null;
+            }
+
+            foreach (var zone in CampusZones)
+            {
+                if (zone.Hints.Any(text.Contains))
+                {
+                    return zone.Label;
+                }
+            }
+
+            return null;
+        }
+
+        private static string? ZoneFromCoordinates(double latitude, double longitude)
+        {
+            if (latitude == 0 && longitude == 0)
+            {
+                return null;
+            }
+
+            return CampusZones.FirstOrDefault(zone => IsPointInPolygon(latitude, longitude, zone.Points))?.Label;
+        }
+
+        private static bool IsPointInPolygon(double latitude, double longitude, (double Lat, double Lng)[] polygon)
+        {
+            var inside = false;
+            for (int i = 0, j = polygon.Length - 1; i < polygon.Length; j = i++)
+            {
+                var yi = polygon[i].Lat;
+                var xi = polygon[i].Lng;
+                var yj = polygon[j].Lat;
+                var xj = polygon[j].Lng;
+
+                var intersects = (yi > latitude) != (yj > latitude)
+                    && longitude < ((xj - xi) * (latitude - yi) / (yj - yi)) + xi;
+                if (intersects)
+                {
+                    inside = !inside;
+                }
+            }
+
+            return inside;
+        }
+
+        private static bool IsUnknownZone(string? value)
+        {
+            var text = NormalizeSearchText(value);
+            return string.IsNullOrWhiteSpace(text) || text is "NO DISPONIBLE" or "UBICACION DESCONOCIDA";
+        }
+
+        private static string NormalizeSearchText(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            var normalized = value.Trim().ToUpperInvariant().Normalize(NormalizationForm.FormD);
+            var builder = new StringBuilder(normalized.Length);
+            foreach (var character in normalized)
+            {
+                if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+                {
+                    builder.Append(character);
+                }
+            }
+
+            return builder.ToString().Normalize(NormalizationForm.FormC);
         }
     }
 }

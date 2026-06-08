@@ -48,17 +48,6 @@ export const CAMPUS_ZONES = [
       { latitude: -1.27065, longitude: -78.624212 },
     ],
   },
-  {
-    id: 'Z5',
-    name: 'Zona 5',
-    color: '#9333ea',
-    coords: [
-      { latitude: -1.2682, longitude: -78.625 },
-      { latitude: -1.2682, longitude: -78.624212 },
-      { latitude: -1.2694, longitude: -78.624212 },
-      { latitude: -1.2694, longitude: -78.625 },
-    ],
-  },
 ];
 
 export const WALKWAY_NODES = {

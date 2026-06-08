@@ -33,22 +33,6 @@ const parseBackendDate = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const normalizeZoneLabel = (zone, geofence) => {
-  const normalizedZone = String(zone || '').trim().toUpperCase();
-  if (normalizedZone && normalizedZone !== 'NO DISPONIBLE' && normalizedZone !== 'UBICACIÓN DESCONOCIDA') {
-    return zone;
-  }
-
-  const normalizedGeofence = String(geofence || '').trim().toUpperCase();
-
-  if (normalizedGeofence.includes('INGEN')) return 'Zona 1';
-  if (normalizedGeofence.includes('BIBLI')) return 'Zona 2';
-  if (normalizedGeofence.includes('RECTOR') || normalizedGeofence.includes('ADMIN')) return 'Zona 3';
-  if (normalizedGeofence.includes('DEPOR')) return 'Zona 4';
-
-  return zone || geofence || 'Ubicación desconocida';
-};
-
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -102,6 +86,65 @@ const zones = [
     ],
   },
 ];
+
+const normalizeSearchText = (value) => String(value || '')
+  .trim()
+  .toUpperCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '');
+
+const zoneFromText = (value) => {
+  const text = normalizeSearchText(value);
+  if (!text || text === 'NO DISPONIBLE' || text === 'UBICACION DESCONOCIDA') return '';
+  if (/\bZONA\s*1\b|\bZ1\b/.test(text) || text.includes('INGEN')) return 'Zona 1';
+  if (/\bZONA\s*2\b|\bZ2\b/.test(text) || text.includes('BIBLI')) return 'Zona 2';
+  if (/\bZONA\s*3\b|\bZ3\b/.test(text) || text.includes('RECTOR') || text.includes('ADMIN')) return 'Zona 3';
+  if (/\bZONA\s*4\b|\bZ4\b/.test(text) || text.includes('DEPOR')) return 'Zona 4';
+  return '';
+};
+
+const pointInPolygon = (point, polygon) => {
+  const lat = Number(point?.lat);
+  const lng = Number(point?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i += 1) {
+    const yi = polygon[i][0];
+    const xi = polygon[i][1];
+    const yj = polygon[j][0];
+    const xj = polygon[j][1];
+    const intersects = ((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi);
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+};
+
+const zoneFromCoordinates = (position) => {
+  const match = zones.find((zone) => pointInPolygon(position, zone.positions));
+  return match?.label || '';
+};
+
+const normalizeZoneLabel = (zone, geofence, position) => {
+  const fromText = zoneFromText(zone) || zoneFromText(geofence);
+  if (fromText) return fromText;
+
+  const fromCoordinates = zoneFromCoordinates(position);
+  if (fromCoordinates) return fromCoordinates;
+
+  const normalizedZone = normalizeSearchText(zone);
+  if (normalizedZone && normalizedZone !== 'NO DISPONIBLE' && normalizedZone !== 'UBICACION DESCONOCIDA') {
+    return zone;
+  }
+
+  const normalizedGeofence = normalizeSearchText(geofence);
+  if (normalizedGeofence && normalizedGeofence !== 'NO DISPONIBLE' && normalizedGeofence !== 'UBICACION DESCONOCIDA') {
+    return geofence;
+  }
+
+  return 'UbicaciÃ³n desconocida';
+};
 
 const createRelativeDate = (hours = 0, minutes = 0) => new Date(Date.now() - ((hours * 60) + minutes) * 60 * 1000);
 
@@ -750,22 +793,25 @@ function App({ onLogout, session }) {
         const response = await axios.get(`http://${serverIp}:5000/api/incidents`);
         const items = Array.isArray(response.data) ? response.data : [];
 
-        const mapped = items.map((item) => ({
-          id: item.incId,
-          motivo: String(item.incMotivo || 'EMERGENCIA').toUpperCase(),
-          zone: normalizeZoneLabel(item.incZona, item.incGeocercaNombre),
-          user: item.incReportadoPor || 'Usuario institucional',
-          faculty: item.incFacultad || 'UTA',
-          status: normalizeStatus(item.incEstado || item.incSeveridad),
-          time: formatRelativeTime(item.incFechaReporte),
-          timestamp: parseBackendDate(item.incFechaReporte) || new Date(),
-          pos: { lat: item.incLatitud, lng: item.incLongitud },
-          assignedBy: item.incAsignadoPor || null,
-          assignedAt: parseBackendDate(item.incAsignadoEn),
-          closedBy: item.incCerradoPor || null,
-          closedAt: parseBackendDate(item.incCerradoEn),
-          observation: item.incObservacion || '',
-        }));
+        const mapped = items.map((item) => {
+          const position = { lat: item.incLatitud, lng: item.incLongitud };
+          return {
+            id: item.incId,
+            motivo: String(item.incMotivo || 'EMERGENCIA').toUpperCase(),
+            zone: normalizeZoneLabel(item.incZona, item.incGeocercaNombre, position),
+            user: item.incReportadoPor || 'Usuario institucional',
+            faculty: item.incFacultad || 'UTA',
+            status: normalizeStatus(item.incEstado || item.incSeveridad),
+            time: formatRelativeTime(item.incFechaReporte),
+            timestamp: parseBackendDate(item.incFechaReporte) || new Date(),
+            pos: position,
+            assignedBy: item.incAsignadoPor || null,
+            assignedAt: parseBackendDate(item.incAsignadoEn),
+            closedBy: item.incCerradoPor || null,
+            closedAt: parseBackendDate(item.incCerradoEn),
+            observation: item.incObservacion || '',
+          };
+        });
 
         const merged = [
           ...mapped,
@@ -792,16 +838,17 @@ function App({ onLogout, session }) {
       .build();
 
     connection.on('ReceiveAlert', (incident) => {
+      const position = { lat: incident.incLatitud, lng: incident.incLongitud };
       const nextIncident = {
         id: incident.incId || `INC-${Date.now()}`,
         motivo: (incident.incMotivo || 'EMERGENCIA').toUpperCase(),
-        zone: normalizeZoneLabel(incident.incZona, incident.incGeocercaNombre),
+        zone: normalizeZoneLabel(incident.incZona, incident.incGeocercaNombre, position),
         user: incident.incReportadoPor || 'Usuario institucional',
         faculty: incident.incFacultad || 'UTA',
         status: 'Activo',
         time: 'ahora',
         timestamp: new Date(),
-        pos: { lat: incident.incLatitud, lng: incident.incLongitud },
+        pos: position,
         closedBy: null,
         closedAt: null,
         assignedBy: null,
@@ -830,7 +877,7 @@ function App({ onLogout, session }) {
         return {
           ...item,
           status: nextStatus,
-          zone: normalizeZoneLabel(incident.incZona || item.zone, incident.incGeocercaNombre || item.zone),
+          zone: normalizeZoneLabel(incident.incZona || item.zone, incident.incGeocercaNombre || item.zone, item.pos),
           assignedBy: incident.incAsignadoPor || item.assignedBy || null,
           assignedAt: parseBackendDate(incident.incAsignadoEn) || item.assignedAt,
           closedBy: incident.incCerradoPor || item.closedBy || null,

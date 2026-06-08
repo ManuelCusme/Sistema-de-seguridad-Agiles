@@ -1040,7 +1040,7 @@ function GuardPage() {
               </IonCardHeader>
               <IonCardContent className="stack">
                 <IonSelect label="Zona" labelPlacement="stacked" value={roundZone} onIonChange={(e) => setRoundZone(e.detail.value)}>
-                  {['Zona 1', 'Zona 2', 'Zona 3', 'Zona 4', 'Zona 5'].map((zone) => <IonSelectOption key={zone} value={zone}>{zone}</IonSelectOption>)}
+                  {['Zona 1', 'Zona 2', 'Zona 3', 'Zona 4'].map((zone) => <IonSelectOption key={zone} value={zone}>{zone}</IonSelectOption>)}
                 </IonSelect>
                 <IonButton expand="block" onClick={startRound} disabled={busy || Boolean(activeRound)}>Iniciar ronda</IonButton>
                 <IonTextarea label="Observacion de cierre" labelPlacement="stacked" value={roundObservation} onIonInput={(e) => setRoundObservation(e.detail.value || '')} />
