@@ -12,6 +12,7 @@ namespace UtaSecurity.Services.Incidents.Data
         public DbSet<IncidentEntity> Incidents { get; set; }
         public DbSet<TrustGroupEntity> TrustGroups { get; set; }
         public DbSet<TrustGroupMemberEntity> TrustGroupMembers { get; set; }
+        public DbSet<TrustGroupInviteEntity> TrustGroupInvites { get; set; }
         public DbSet<GuardRoundEntity> GuardRounds { get; set; }
         public DbSet<GuardDutyStatusEntity> GuardDutyStatuses { get; set; }
         public DbSet<IncidentTypeEntity> IncidentTypes { get; set; }
@@ -65,6 +66,24 @@ namespace UtaSecurity.Services.Incidents.Data
                 entity.Property(e => e.CreatedAt).IsRequired().HasDefaultValueSql("GETDATE()");
                 entity.Property(e => e.IsActive).IsRequired().HasDefaultValue(true);
                 entity.HasIndex(e => new { e.TrustGroupId, e.MemberUserId }).IsUnique();
+            });
+
+            modelBuilder.Entity<TrustGroupInviteEntity>(entity =>
+            {
+                entity.ToTable("TrustGroupInvites");
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Id).HasDefaultValueSql("NEWID()");
+                entity.Property(e => e.TrustGroupId).IsRequired();
+                entity.Property(e => e.CreatedByUserId).IsRequired();
+                entity.Property(e => e.Token).IsRequired().HasMaxLength(80);
+                entity.Property(e => e.CreatedAt).IsRequired().HasDefaultValueSql("GETDATE()");
+                entity.Property(e => e.ExpiresAt).IsRequired();
+                entity.Property(e => e.IsActive).IsRequired().HasDefaultValue(true);
+                entity.HasIndex(e => e.Token).IsUnique();
+                entity.HasOne(e => e.TrustGroup)
+                    .WithMany()
+                    .HasForeignKey(e => e.TrustGroupId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             modelBuilder.Entity<GuardRoundEntity>(entity =>

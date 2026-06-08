@@ -176,6 +176,8 @@ using (var scope = app.Services.CreateScope())
             ('Otros', 'OTROS', NCHAR(0xD83D) + NCHAR(0xDEA8), '#4d82ff')
         ) AS source (Name, Code, Emoji, Color)
         ON target.Code = source.Code
+        WHEN MATCHED THEN
+            UPDATE SET target.Name = source.Name, target.Emoji = source.Emoji, target.Color = source.Color, target.IsActive = 1, target.UpdatedAt = GETDATE()
         WHEN NOT MATCHED THEN
             INSERT (Id, Name, Code, Emoji, Color, IsActive, CreatedAt)
             VALUES (NEWID(), source.Name, source.Code, source.Emoji, source.Color, 1, GETDATE());

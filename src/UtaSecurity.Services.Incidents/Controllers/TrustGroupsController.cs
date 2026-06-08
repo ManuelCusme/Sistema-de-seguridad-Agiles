@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
 using UtaSecurity.Services.Incidents.Data;
 using UtaSecurity.Services.Incidents.Models;
 
@@ -56,6 +57,38 @@ namespace UtaSecurity.Services.Incidents.Controllers
             }));
         }
 
+        [HttpGet("member-of")]
+        public async Task<IActionResult> GetGroupsAsMember([FromQuery] string usuId)
+        {
+            if (!Guid.TryParse(usuId, out var memberUserId))
+            {
+                return BadRequest(new { success = false, error = "Se requiere usuId valido." });
+            }
+
+            var memberGroups = await _context.TrustGroupMembers
+                .AsNoTracking()
+                .Include(m => m.TrustGroup)
+                .Where(m => m.MemberUserId == memberUserId && m.IsActive && m.TrustGroup != null && m.TrustGroup.IsActive)
+                .OrderByDescending(m => m.CreatedAt)
+                .ToListAsync();
+
+            var ownerIds = memberGroups.Select(m => m.TrustGroup!.OwnerUserId).Distinct().ToList();
+            var owners = await _context.UserDirectory.AsNoTracking()
+                .Where(u => ownerIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u);
+
+            return Ok(memberGroups.Select(m => {
+                owners.TryGetValue(m.TrustGroup!.OwnerUserId, out var owner);
+                return new
+                {
+                    id = m.TrustGroup.Id,
+                    nombre = m.TrustGroup.Name,
+                    propietario = owner?.NombreCompleto ?? m.TrustGroup.OwnerUserId.ToString(),
+                    propietarioEmail = owner?.Email ?? string.Empty
+                };
+            }));
+        }
+
         [HttpPost]
         public async Task<IActionResult> CreateGroup([FromBody] TrustGroupCreateDto request)
         {
@@ -68,6 +101,11 @@ namespace UtaSecurity.Services.Incidents.Controllers
             if (string.IsNullOrWhiteSpace(name))
             {
                 return BadRequest(new { success = false, error = "El nombre del grupo es obligatorio." });
+            }
+
+            if (name.Length > 120)
+            {
+                return BadRequest(new { success = false, error = "El nombre del grupo no puede superar los 120 caracteres." });
             }
 
             var group = new TrustGroupEntity
@@ -109,24 +147,116 @@ namespace UtaSecurity.Services.Incidents.Controllers
                 return BadRequest(new { success = false, error = "No puedes agregarte como miembro de tu propio grupo." });
             }
 
-            var existing = await _context.TrustGroupMembers.FirstOrDefaultAsync(item => item.TrustGroupId == groupId && item.MemberUserId == memberUserId.Value);
-            if (existing != null)
+            var isAlreadyMember = await _context.TrustGroupMembers.AnyAsync(item => item.TrustGroupId == groupId && item.MemberUserId == memberUserId.Value && item.IsActive);
+            if (isAlreadyMember)
             {
-                existing.IsActive = true;
-            }
-            else
-            {
-                _context.TrustGroupMembers.Add(new TrustGroupMemberEntity
-                {
-                    TrustGroupId = groupId,
-                    MemberUserId = memberUserId.Value,
-                    CreatedAt = DateTime.UtcNow,
-                    IsActive = true
-                });
+                return BadRequest(new { success = false, error = "El usuario ya es miembro de este grupo." });
             }
 
+            await AddOrReactivateMemberAsync(groupId, memberUserId.Value);
             await _context.SaveChangesAsync();
             return Ok(new { success = true, memberUserId = memberUserId.Value });
+        }
+
+        [HttpPost("{groupId:guid}/invites")]
+        public async Task<IActionResult> CreateInvite(Guid groupId, [FromBody] TrustGroupInviteCreateDto request)
+        {
+            if (!Guid.TryParse(request?.usuId, out var ownerUserId))
+            {
+                return BadRequest(new { success = false, error = "Se requiere usuId valido." });
+            }
+
+            var group = await _context.TrustGroups.AsNoTracking().FirstOrDefaultAsync(item => item.Id == groupId && item.OwnerUserId == ownerUserId && item.IsActive);
+            if (group == null)
+            {
+                return NotFound(new { success = false, error = "No se encontro el grupo solicitado." });
+            }
+
+            var expiresInMinutes = Math.Clamp(request?.expiresInMinutes ?? 15, 5, 60);
+            var invite = new TrustGroupInviteEntity
+            {
+                TrustGroupId = groupId,
+                CreatedByUserId = ownerUserId,
+                Token = GenerateInviteToken(),
+                CreatedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddMinutes(expiresInMinutes),
+                IsActive = true
+            };
+
+            _context.TrustGroupInvites.Add(invite);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                token = invite.Token,
+                inviteUrl = $"utasecurity://trust-groups/join?token={invite.Token}",
+                grupoId = group.Id,
+                grupoNombre = group.Name,
+                expiraEn = invite.ExpiresAt
+            });
+        }
+
+        [HttpPost("invites/accept")]
+        public async Task<IActionResult> AcceptInvite([FromBody] TrustGroupInviteAcceptDto request)
+        {
+            if (!Guid.TryParse(request?.usuId, out var memberUserId))
+            {
+                return BadRequest(new { success = false, error = "Se requiere usuId valido." });
+            }
+
+            var token = ExtractInviteToken(request?.token);
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return BadRequest(new { success = false, error = "El codigo QR no contiene una invitacion valida." });
+            }
+
+            var invite = await _context.TrustGroupInvites
+                .Include(item => item.TrustGroup)
+                .FirstOrDefaultAsync(item => item.Token == token && item.IsActive);
+
+            if (invite == null || invite.TrustGroup == null || !invite.TrustGroup.IsActive)
+            {
+                return NotFound(new { success = false, error = "La invitacion no existe o ya no esta disponible." });
+            }
+
+            if (invite.ExpiresAt < DateTime.UtcNow)
+            {
+                invite.IsActive = false;
+                await _context.SaveChangesAsync();
+                return BadRequest(new { success = false, error = "La invitacion expiro. Solicita un QR nuevo." });
+            }
+
+            if (invite.TrustGroup.OwnerUserId == memberUserId)
+            {
+                return BadRequest(new { success = false, error = "No puedes unirte a tu propio grupo." });
+            }
+
+            var isAlreadyMember = await _context.TrustGroupMembers.AnyAsync(item => item.TrustGroupId == invite.TrustGroupId && item.MemberUserId == memberUserId && item.IsActive);
+            if (isAlreadyMember)
+            {
+                return BadRequest(new { success = false, error = "Ya eres miembro de este grupo de confianza." });
+            }
+
+            var userExists = await _context.UserDirectory.AnyAsync(item => item.Id == memberUserId && item.IsActive);
+            if (!userExists)
+            {
+                return NotFound(new { success = false, error = "No se encontro un usuario activo para unir al grupo." });
+            }
+
+            await AddOrReactivateMemberAsync(invite.TrustGroupId, memberUserId);
+            invite.UsedAt = DateTime.UtcNow;
+            invite.UsedByUserId = memberUserId;
+            invite.IsActive = false;
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                grupoId = invite.TrustGroup.Id,
+                grupoNombre = invite.TrustGroup.Name,
+                memberUserId
+            });
         }
 
         [HttpDelete("{groupId:guid}/members/{memberId:guid}")]
@@ -194,6 +324,56 @@ namespace UtaSecurity.Services.Incidents.Controllers
 
             var user = await _context.UserDirectory.AsNoTracking().FirstOrDefaultAsync(item => item.Email.ToLower() == email && item.IsActive);
             return user?.Id;
+        }
+
+        private async Task AddOrReactivateMemberAsync(Guid groupId, Guid memberUserId)
+        {
+            var existing = await _context.TrustGroupMembers.FirstOrDefaultAsync(item => item.TrustGroupId == groupId && item.MemberUserId == memberUserId);
+            if (existing != null)
+            {
+                existing.IsActive = true;
+                return;
+            }
+
+            _context.TrustGroupMembers.Add(new TrustGroupMemberEntity
+            {
+                TrustGroupId = groupId,
+                MemberUserId = memberUserId,
+                CreatedAt = DateTime.UtcNow,
+                IsActive = true
+            });
+        }
+
+        private static string GenerateInviteToken()
+        {
+            return Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+                .Replace("+", "-")
+                .Replace("/", "_")
+                .TrimEnd('=');
+        }
+
+        private static string ExtractInviteToken(string? rawValue)
+        {
+            var value = rawValue?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            {
+                var query = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var part in query)
+                {
+                    var pieces = part.Split('=', 2);
+                    if (pieces.Length == 2 && string.Equals(pieces[0], "token", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Uri.UnescapeDataString(pieces[1]);
+                    }
+                }
+            }
+
+            return value;
         }
     }
 }

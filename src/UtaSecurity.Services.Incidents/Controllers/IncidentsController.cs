@@ -147,16 +147,40 @@ namespace UtaSecurity.Services.Incidents.Controllers
                 AlertConnectionRegistry.AdminsGroup
             };
 
-            var trustMemberIds = await _context.TrustGroups
+            // 1. Si el reportero es el dueño de algún grupo de confianza: obtener todos los miembros activos
+            var membersOfOwnedGroups = await _context.TrustGroups
                 .AsNoTracking()
                 .Where(group => group.OwnerUserId == reporterUserId && group.IsActive)
-                .SelectMany(group => group.Members.Where(member => member.IsActive).Select(member => member.MemberUserId))
+                .SelectMany(group => group.Members.Where(m => m.IsActive).Select(m => m.MemberUserId))
                 .Distinct()
                 .ToListAsync();
 
-            foreach (var memberUserId in trustMemberIds)
+            // 2. Si el reportero es miembro de algún grupo de confianza: obtener el dueño de ese grupo
+            var ownersOfJoinedGroups = await _context.TrustGroupMembers
+                .AsNoTracking()
+                .Where(member => member.MemberUserId == reporterUserId && member.IsActive && member.TrustGroup.IsActive)
+                .Select(member => member.TrustGroup.OwnerUserId)
+                .Distinct()
+                .ToListAsync();
+
+            // 3. Si el reportero es miembro de algún grupo de confianza: obtener los demás compañeros del mismo grupo
+            var coMembersOfJoinedGroups = await _context.TrustGroupMembers
+                .AsNoTracking()
+                .Where(member => member.MemberUserId == reporterUserId && member.IsActive && member.TrustGroup.IsActive)
+                .SelectMany(member => member.TrustGroup.Members.Where(m => m.IsActive && m.MemberUserId != reporterUserId).Select(m => m.MemberUserId))
+                .Distinct()
+                .ToListAsync();
+
+            // Combinar todos los destinatarios en un solo conjunto de IDs únicos
+            var targetUserIds = new HashSet<Guid>();
+            foreach (var id in membersOfOwnedGroups) targetUserIds.Add(id);
+            foreach (var id in ownersOfJoinedGroups) targetUserIds.Add(id);
+            foreach (var id in coMembersOfJoinedGroups) targetUserIds.Add(id);
+
+            // Agregar el prefijo de grupo SignalR para cada usuario de confianza destinatario
+            foreach (var userId in targetUserIds)
             {
-                groups.Add($"{AlertConnectionRegistry.TrustUserGroupPrefix}{memberUserId}");
+                groups.Add($"{AlertConnectionRegistry.TrustUserGroupPrefix}{userId}");
             }
 
             return groups.ToList();

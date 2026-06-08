@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Text, Surface, Headline, IconButton, Button } from 'react-native-paper';
 import * as Location from 'expo-location';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import axios from 'axios';
 import * as signalR from '@microsoft/signalr';
 import { useAuth } from '../context/AuthContext';
@@ -20,6 +21,8 @@ import { useNavigation } from '@react-navigation/native';
 import { Picker } from '@react-native-picker/picker';
 import { INCIDENT_CATALOG, INCIDENT_DEFAULT, getIncidentByValue, mapIncidentTypesFromApi } from '../constants/incidentCatalog';
 import { ALERTS_HUB_URL } from '../config/network';
+import { scheduleIncidentLocalNotification } from '../utils/notifications';
+import QrCodeView from '../components/QrCodeView';
 
 const DRAWER_WIDTH = 236;
 const GUAYAQUIL_OFFSET_MS = 5 * 60 * 60 * 1000;
@@ -65,6 +68,13 @@ const HomeScreen = () => {
   const [trustMemberInput, setTrustMemberInput] = useState('');
   const [selectedTrustGroupId, setSelectedTrustGroupId] = useState('');
   const [trustLoading, setTrustLoading] = useState(false);
+  const [trustInvite, setTrustInvite] = useState(null);
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [scannerLocked, setScannerLocked] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [trustSubSection, setTrustSubSection] = useState('manage');
+  const [joinedGroups, setJoinedGroups] = useState([]);
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -107,22 +117,60 @@ const HomeScreen = () => {
       const catalogItem = getIncidentByValue(incident.incMotivo, incidentCatalog);
       Alert.alert(
         'Alerta de tu grupo de confianza',
-        `${incident.incReportadoPor || 'Un estudiante'} activó ${catalogItem.label} en ${incident.incZona || 'zona no disponible'}.`
+        `${incident.incReportadoPor || 'Un estudiante'} activó ${catalogItem.label} en ${incident.incZona || 'zona no disponible'}.`,
+        [
+          { text: 'Cerrar', style: 'cancel' },
+          {
+            text: 'Ver Ruta / Mapa',
+            onPress: () => {
+              navigation.navigate('DetalleIncidente', {
+                incidenteId: incident.incId,
+                zona: incident.incZona || incident.incGeocercaNombre || 'No disponible',
+                tipo: catalogItem.label,
+                timestamp: incident.incFechaReporte 
+                  ? `${formatDate(incident.incFechaReporte)} ${formatTime(incident.incFechaReporte)}`
+                  : new Date().toLocaleString('es-EC'),
+                latitude: incident.incLatitud,
+                longitude: incident.incLongitud,
+              });
+            }
+          }
+        ]
       );
+      scheduleIncidentLocalNotification(incident, 'Alerta de tu grupo de confianza');
+    });
+
+    connection.on('ReceiveIncidentTypesChanged', () => {
+      loadIncidentTypes();
     });
 
     connection.start().catch((error) => {
-      console.error('No se pudo conectar a alertas de confianza:', error.message);
+      console.warn('No se pudo conectar a alertas de confianza:', error.message);
     });
 
     return () => {
       trustConnectionRef.current = null;
       connection.off('ReceiveAlert');
+      connection.off('ReceiveIncidentTypesChanged');
       if (connection.state === signalR.HubConnectionState.Connected) {
         connection.stop().catch(() => {});
       }
     };
   }, [myUserId, incidentCatalog]);
+
+  useEffect(() => {
+    if (!inviteModalVisible || !myUserId) {
+      return undefined;
+    }
+
+    const interval = setInterval(() => {
+      loadTrustGroups();
+    }, 3000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [inviteModalVisible, myUserId]);
 
   const openDrawer = () => {
     setDrawerVisible(true);
@@ -188,7 +236,7 @@ const HomeScreen = () => {
         return updated || filtered[0] || null;
       });
     } catch (error) {
-      console.error('No se pudo cargar el historial:', error.message);
+      console.warn('No se pudo cargar el historial:', error.message);
       setHistoryError('No pudimos cargar tu historial en este momento.');
     } finally {
       setHistoryLoading(false);
@@ -228,7 +276,7 @@ const HomeScreen = () => {
 
       setUserDirectory(directory);
     } catch (error) {
-      console.error('No se pudo cargar el directorio de usuarios:', error.message);
+      console.warn('No se pudo cargar el directorio de usuarios:', error.message);
     }
   };
 
@@ -241,7 +289,7 @@ const HomeScreen = () => {
       setIncidentCatalog(catalog);
       setMotivo((current) => (catalog.some((item) => item.value === current) ? current : (catalog[0]?.value || INCIDENT_DEFAULT.value)));
     } catch (error) {
-      console.error('No se pudieron cargar tipos de incidente:', error.message);
+      console.warn('No se pudieron cargar tipos de incidente:', error.message);
       setIncidentCatalog(INCIDENT_CATALOG);
     }
   };
@@ -259,9 +307,19 @@ const HomeScreen = () => {
       });
       const groups = Array.isArray(response.data) ? response.data : [];
       setTrustGroups(groups);
-      setSelectedTrustGroupId((current) => current || groups[0]?.id || '');
+      setSelectedTrustGroupId((current) => {
+        const exists = groups.some((g) => g.id === current);
+        return exists ? current : (groups[0]?.id || '');
+      });
+
+      const resMember = await axios.get(`${API_URL}/trust-groups/member-of`, {
+        params: { usuId: myUserId },
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      const joined = Array.isArray(resMember.data) ? resMember.data : [];
+      setJoinedGroups(joined);
     } catch (error) {
-      console.error('No se pudieron cargar grupos de confianza:', error.message);
+      console.warn('No se pudieron cargar grupos de confianza:', error.message);
     } finally {
       setTrustLoading(false);
     }
@@ -281,7 +339,8 @@ const HomeScreen = () => {
       setTrustGroupName('');
       await loadTrustGroups();
     } catch (error) {
-      console.error('No se pudo crear el grupo:', error.message);
+      console.warn('No se pudo crear el grupo:', error.message);
+      Alert.alert('Error', error?.response?.data?.error || 'No se pudo crear el grupo de confianza.');
     } finally {
       setTrustLoading(false);
     }
@@ -303,9 +362,162 @@ const HomeScreen = () => {
       setTrustMemberInput('');
       await loadTrustGroups();
     } catch (error) {
-      console.error('No se pudo agregar miembro:', error.message);
+      console.warn('No se pudo agregar miembro:', error.message);
+      Alert.alert('Error', error?.response?.data?.error || 'No se pudo agregar el miembro. Verifica que el ID o correo sea correcto.');
     } finally {
       setTrustLoading(false);
+    }
+  };
+
+  const deleteTrustGroup = async (groupId) => {
+    if (!groupId || !myUserId) return;
+    Alert.alert(
+      'Eliminar grupo',
+      '¿Estás seguro de que deseas eliminar este grupo de confianza? Los miembros ya no recibirán tus alertas.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            setTrustLoading(true);
+            try {
+              await axios.delete(`${API_URL}/trust-groups/${groupId}`, {
+                params: { usuId: myUserId },
+                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              });
+              if (selectedTrustGroupId === groupId) {
+                setSelectedTrustGroupId('');
+              }
+              await loadTrustGroups();
+              Alert.alert('Grupo eliminado', 'El grupo ha sido eliminado con éxito.');
+            } catch (error) {
+              console.warn('No se pudo eliminar el grupo:', error.message);
+              Alert.alert('Error', error?.response?.data?.error || 'No se pudo eliminar el grupo.');
+            } finally {
+              setTrustLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const removeTrustMember = async (groupId, memberId, memberName) => {
+    if (!groupId || !memberId || !myUserId) return;
+    Alert.alert(
+      'Remover miembro',
+      `¿Estás seguro de que deseas remover a ${memberName || 'este miembro'} del grupo?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Remover',
+          style: 'destructive',
+          onPress: async () => {
+            setTrustLoading(true);
+            try {
+              await axios.delete(`${API_URL}/trust-groups/${groupId}/members/${memberId}`, {
+                params: { usuId: myUserId },
+                headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              });
+              await loadTrustGroups();
+              Alert.alert('Miembro removido', 'El miembro ha sido removido con éxito.');
+            } catch (error) {
+              console.warn('No se pudo remover el miembro:', error.message);
+              Alert.alert('Error', error?.response?.data?.error || 'No se pudo remover el miembro.');
+            } finally {
+              setTrustLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const createTrustInvite = async () => {
+    if (!selectedTrustGroupId || !myUserId) {
+      return;
+    }
+
+    setTrustLoading(true);
+    try {
+      const response = await axios.post(`${API_URL}/trust-groups/${selectedTrustGroupId}/invites`, {
+        usuId: myUserId,
+        expiresInMinutes: 15,
+      });
+
+      setTrustInvite(response.data);
+      setInviteModalVisible(true);
+    } catch (error) {
+      const message = error?.response?.data?.error || 'No se pudo generar la invitacion QR.';
+      Alert.alert('Invitacion no disponible', message);
+    } finally {
+      setTrustLoading(false);
+    }
+  };
+
+  const extractTrustInviteToken = (value) => {
+    const text = String(value || '').trim();
+    if (!text) {
+      return '';
+    }
+
+    const match = text.match(/[?&]token=([^&]+)/i);
+    return match ? decodeURIComponent(match[1]) : text;
+  };
+
+  const acceptTrustInvite = async (rawToken) => {
+    try {
+      const tokenValue = extractTrustInviteToken(rawToken);
+      if (!tokenValue || !myUserId) {
+        Alert.alert('QR no valido', 'El codigo escaneado no contiene una invitacion de grupo.');
+        setScannerLocked(false);
+        return;
+      }
+
+      setTrustLoading(true);
+      const response = await axios.post(`${API_URL}/trust-groups/invites/accept`, {
+        usuId: myUserId,
+        token: tokenValue,
+      });
+
+      setScannerVisible(false);
+      await loadTrustGroups();
+      Alert.alert('Grupo unido', `Te uniste a ${response.data?.grupoNombre || 'un grupo de confianza'}.`);
+    } catch (error) {
+      const message = error?.response?.data?.error || 'No se pudo aceptar la invitacion.';
+      Alert.alert('Invitacion rechazada', message);
+    } finally {
+      setTrustLoading(false);
+      setScannerLocked(false);
+    }
+  };
+
+  const openTrustScanner = async () => {
+    if (!cameraPermission?.granted) {
+      const permission = await requestCameraPermission();
+      if (!permission?.granted) {
+        Alert.alert('Camara requerida', 'Necesitamos acceso a la camara para escanear el QR.');
+        return;
+      }
+    }
+
+    setScannerLocked(false);
+    setScannerVisible(true);
+  };
+
+  const handleTrustQrScanned = ({ data }) => {
+    try {
+      if (scannerLocked) {
+        return;
+      }
+
+      setScannerLocked(true);
+      acceptTrustInvite(data);
+    } catch (err) {
+      console.error('Error al procesar escaneo QR:', err);
+      setScannerLocked(false);
+      Alert.alert('Error', 'Ocurrio un error inesperado al procesar el codigo QR.');
     }
   };
 
@@ -370,7 +582,8 @@ const HomeScreen = () => {
         loadHistory();
       }
     } catch (error) {
-      console.error(error);
+      console.warn('Error al enviar alerta:', error?.message || error);
+      Alert.alert('Error de red', 'No se pudo enviar la alerta. Verifica tu conexión a internet.');
     } finally {
       setLoading(false);
       handlePressOut();
@@ -727,72 +940,207 @@ const HomeScreen = () => {
     );
   };
 
-  const renderTrustGroupsView = () => (
-    <View style={styles.sectionCard}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionKicker}>GRUPOS DE CONFIANZA</Text>
-        <Text style={styles.label}>Contactos que recibirán tu alerta</Text>
-      </View>
+  const renderTrustGroupsView = () => {
+    const selectedGroup = trustGroups.find((g) => g.id === selectedTrustGroupId) || trustGroups[0];
 
-      <Surface style={styles.formPanel}>
-        <TextInput
-          style={styles.textInput}
-          placeholder="Nombre del grupo"
-          value={trustGroupName}
-          onChangeText={setTrustGroupName}
-        />
-        <Button mode="contained" onPress={createTrustGroup} disabled={trustLoading || !trustGroupName.trim()} style={styles.formButton}>
-          Crear grupo
-        </Button>
-      </Surface>
-
-      {trustGroups.length > 0 ? (
-        <Surface style={styles.formPanel}>
-          <Picker selectedValue={selectedTrustGroupId} onValueChange={setSelectedTrustGroupId} style={styles.picker}>
-            {trustGroups.map((group) => (
-              <Picker.Item key={group.id} label={group.nombre} value={group.id} />
-            ))}
-          </Picker>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Correo o ID del usuario"
-            value={trustMemberInput}
-            autoCapitalize="none"
-            onChangeText={setTrustMemberInput}
-          />
-          <Button mode="contained" onPress={addTrustMember} disabled={trustLoading || !trustMemberInput.trim()} style={styles.formButton}>
-            Agregar miembro
-          </Button>
-        </Surface>
-      ) : null}
-
-      {trustLoading ? <ActivityIndicator color="#4d82ff" /> : null}
-
-      {trustGroups.length === 0 && !trustLoading ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>Aún no tienes grupos</Text>
-          <Text style={styles.emptyText}>Crea un grupo y agrega usuarios por correo institucional o ID.</Text>
+    return (
+      <View style={styles.sectionCard}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionKicker}>GRUPOS DE CONFIANZA</Text>
+          <Text style={styles.label}>Contactos de emergencia</Text>
         </View>
-      ) : (
-        <View style={styles.historyList}>
-          {trustGroups.map((group) => (
-            <Surface key={group.id} style={styles.historyItem}>
-              <Text style={styles.historyItemTitle}>{group.nombre}</Text>
-              {(group.miembros || []).length === 0 ? (
-                <Text style={styles.historyItemMeta}>Sin miembros agregados todavía.</Text>
-              ) : (
-                (group.miembros || []).map((member) => (
-                  <Text key={member.id} style={styles.historyItemMeta}>
-                    {member.nombre} · {member.email || member.usuId}
-                  </Text>
-                ))
-              )}
+
+        {/* Selector de pestañas */}
+        <View style={styles.tabSelectorRow}>
+          <TouchableOpacity
+            style={[styles.tabSelectorButton, trustSubSection === 'manage' && styles.tabSelectorButtonActive]}
+            onPress={() => setTrustSubSection('manage')}
+          >
+            <Text style={[styles.tabSelectorText, trustSubSection === 'manage' && styles.tabSelectorTextActive]}>
+              👥 Mis Grupos
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabSelectorButton, trustSubSection === 'joined' && styles.tabSelectorButtonActive]}
+            onPress={() => setTrustSubSection('joined')}
+          >
+            <Text style={[styles.tabSelectorText, trustSubSection === 'joined' && styles.tabSelectorTextActive]}>
+              🛡️ Unirse / Pertenezco
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {trustLoading && <ActivityIndicator color="#4d82ff" style={{ marginVertical: 10 }} />}
+
+        {trustSubSection === 'manage' ? (
+          <View style={{ gap: 14 }}>
+            {/* Formulario de creación de grupo */}
+            <Surface style={styles.formPanel}>
+              <Text style={styles.panelTitle}>Crear un nuevo grupo</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Nombre del grupo (ej. Familia, Amigos)"
+                value={trustGroupName}
+                onChangeText={setTrustGroupName}
+              />
+              <Button mode="contained" onPress={createTrustGroup} disabled={trustLoading || !trustGroupName.trim()} style={styles.formButton}>
+                Crear grupo
+              </Button>
             </Surface>
-          ))}
-        </View>
-      )}
-    </View>
-  );
+
+            {/* Administrar grupo actual */}
+            {trustGroups.length > 0 ? (
+              <Surface style={styles.formPanel}>
+                <Text style={styles.panelTitle}>Administrar grupo</Text>
+                <Picker selectedValue={selectedTrustGroupId} onValueChange={setSelectedTrustGroupId} style={styles.picker}>
+                  {trustGroups.map((group) => (
+                    <Picker.Item key={group.id} label={group.nombre} value={group.id} />
+                  ))}
+                </Picker>
+
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Correo o ID del miembro"
+                  value={trustMemberInput}
+                  autoCapitalize="none"
+                  onChangeText={setTrustMemberInput}
+                />
+
+                <Button mode="contained" onPress={addTrustMember} disabled={trustLoading || !trustMemberInput.trim()} style={styles.formButton}>
+                  Agregar miembro
+                </Button>
+
+                <View style={styles.qrActionRow}>
+                  <Button mode="outlined" onPress={createTrustInvite} disabled={trustLoading || !selectedTrustGroupId} style={styles.qrActionButton}>
+                    Generar QR
+                  </Button>
+                  <Button mode="outlined" onPress={() => deleteTrustGroup(selectedTrustGroupId)} disabled={trustLoading || !selectedTrustGroupId} style={[styles.qrActionButton, { borderColor: '#ef4444' }]} labelStyle={{ color: '#ef4444' }}>
+                    Eliminar Grupo
+                  </Button>
+                </View>
+              </Surface>
+            ) : null}
+
+            {/* Miembros del grupo seleccionado */}
+            {selectedGroup ? (
+              <Surface style={styles.membersPanel}>
+                <Text style={styles.panelTitle}>Miembros en "{selectedGroup.nombre}"</Text>
+                {(selectedGroup.miembros || []).length === 0 ? (
+                  <Text style={styles.emptyMembersText}>Sin miembros agregados todavía.</Text>
+                ) : (
+                  (selectedGroup.miembros || []).map((member) => (
+                    <View key={member.id} style={styles.memberListItem}>
+                      <View style={styles.memberInfo}>
+                        <Text style={styles.memberName}>{member.nombre}</Text>
+                        <Text style={styles.memberEmail}>{member.email || member.usuId}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.removeMemberButton}
+                        onPress={() => removeTrustMember(selectedGroup.id, member.id, member.nombre)}
+                      >
+                        <Text style={styles.removeMemberText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                )}
+              </Surface>
+            ) : (
+              !trustLoading && (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyTitle}>Aún no tienes grupos</Text>
+                  <Text style={styles.emptyText}>Crea un grupo arriba para empezar a agregar a tus contactos de confianza.</Text>
+                </View>
+              )
+            )}
+          </View>
+        ) : (
+          <View style={{ gap: 14 }}>
+            {/* Unirse a un grupo vía escáner */}
+            <Surface style={styles.scannerTriggerPanel}>
+              <Text style={styles.panelTitle}>Unirse a un grupo</Text>
+              <Text style={styles.panelSubtitle}>
+                Escanea el código QR generado por tu compañero para unirte a su grupo de confianza y recibir sus alertas.
+              </Text>
+              <Button mode="contained" icon="camera" onPress={openTrustScanner} disabled={trustLoading} style={styles.scanButton} labelStyle={styles.scanButtonLabel}>
+                Escanear Código QR
+              </Button>
+            </Surface>
+
+            {/* Listado de membresías (Grupos unidos) */}
+            <View style={styles.joinedGroupsSection}>
+              <Text style={styles.sectionHeaderTitle}>Grupos a los que pertenezco</Text>
+              {joinedGroups.length === 0 ? (
+                !trustLoading && (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyTitle}>No perteneces a ningún grupo</Text>
+                    <Text style={styles.emptyText}>
+                      Cuando escanees una invitación QR de un compañero, el grupo se mostrará aquí y recibirás sus alertas.
+                    </Text>
+                  </View>
+                )
+              ) : (
+                <View style={styles.historyList}>
+                  {joinedGroups.map((group) => (
+                    <Surface key={group.id} style={styles.joinedGroupItem}>
+                      <View style={styles.joinedGroupIconBox}>
+                        <Text style={styles.joinedGroupIcon}>🛡️</Text>
+                      </View>
+                      <View style={styles.joinedGroupContent}>
+                        <Text style={styles.joinedGroupName}>{group.nombre}</Text>
+                        <Text style={styles.joinedGroupOwner}>Creador: {group.propietario}</Text>
+                        {group.propietarioEmail ? <Text style={styles.joinedGroupEmail}>{group.propietarioEmail}</Text> : null}
+                      </View>
+                    </Surface>
+                  ))}
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* Modal de invitación QR */}
+        <Modal visible={inviteModalVisible} transparent animationType="fade" onRequestClose={() => setInviteModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <Surface style={styles.qrModalCard}>
+              <Text style={styles.detailTitle}>Invitación QR</Text>
+              <Text style={styles.detailSummary}>Muestra este código a la persona que quieres agregar. Expira en 15 minutos.</Text>
+              {trustInvite?.token ? (
+                <View style={styles.qrBox}>
+                  <QrCodeView value={trustInvite.token} size={210} />
+                </View>
+              ) : null}
+              <Text style={[styles.historyItemMeta, { textAlign: 'center', fontWeight: 'bold' }]}>{trustInvite?.grupoNombre || ''}</Text>
+              <Button mode="contained" onPress={() => setInviteModalVisible(false)} style={styles.formButton}>
+                Cerrar
+              </Button>
+            </Surface>
+          </View>
+        </Modal>
+
+        {/* Modal del Escáner QR de Cámara */}
+        <Modal visible={scannerVisible} transparent animationType="fade" onRequestClose={() => setScannerVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <Surface style={styles.scannerModalCard}>
+              <Text style={styles.detailTitle}>Escanear invitación</Text>
+              <View style={styles.cameraBox}>
+                {scannerVisible ? (
+                  <CameraView
+                    style={styles.cameraPreview}
+                    facing="back"
+                    barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                    onBarcodeScanned={scannerLocked ? undefined : handleTrustQrScanned}
+                  />
+                ) : null}
+              </View>
+              <Button mode="outlined" onPress={() => setScannerVisible(false)} style={styles.qrActionButton}>
+                Cancelar
+              </Button>
+            </Surface>
+          </View>
+        </Modal>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -940,6 +1288,54 @@ const styles = StyleSheet.create({
   formButton: {
     borderRadius: 12,
     backgroundColor: '#4d82ff',
+  },
+  qrActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  qrActionButton: {
+    flex: 1,
+    borderRadius: 12,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 18,
+  },
+  qrModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 22,
+    padding: 18,
+    backgroundColor: '#fff',
+    gap: 12,
+  },
+  qrBox: {
+    alignSelf: 'center',
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#d8e1ef',
+  },
+  scannerModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 22,
+    padding: 18,
+    backgroundColor: '#fff',
+    gap: 12,
+  },
+  cameraBox: {
+    height: 300,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#0f172a',
+  },
+  cameraPreview: {
+    flex: 1,
   },
   selectedChipRow: {
     alignItems: 'center',
@@ -1334,6 +1730,161 @@ const styles = StyleSheet.create({
   modalButton: {
     borderRadius: 14,
     backgroundColor: '#4d82ff',
+  },
+  tabSelectorRow: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 14,
+  },
+  tabSelectorButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  tabSelectorButtonActive: {
+    backgroundColor: 'white',
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  tabSelectorText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  tabSelectorTextActive: {
+    color: '#0f172a',
+  },
+  membersPanel: {
+    borderRadius: 18,
+    backgroundColor: 'white',
+    elevation: 2,
+    padding: 14,
+    gap: 10,
+    marginTop: 6,
+  },
+  panelTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0c1726',
+    marginBottom: 4,
+  },
+  emptyMembersText: {
+    color: '#64748b',
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  memberListItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  memberInfo: {
+    flex: 1,
+  },
+  memberName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0c1726',
+  },
+  memberEmail: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  removeMemberButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#fee2e2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeMemberText: {
+    color: '#ef4444',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  scannerTriggerPanel: {
+    borderRadius: 18,
+    backgroundColor: 'white',
+    elevation: 2,
+    padding: 18,
+    alignItems: 'center',
+    gap: 8,
+  },
+  panelSubtitle: {
+    color: '#64748b',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  scanButton: {
+    width: '100%',
+    borderRadius: 12,
+    backgroundColor: '#4d82ff',
+    paddingVertical: 4,
+  },
+  scanButtonLabel: {
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  joinedGroupsSection: {
+    marginTop: 14,
+    gap: 10,
+  },
+  sectionHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0c1726',
+    paddingLeft: 4,
+  },
+  joinedGroupItem: {
+    borderRadius: 18,
+    backgroundColor: 'white',
+    elevation: 2,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  joinedGroupIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#eef4ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  joinedGroupIcon: {
+    fontSize: 20,
+  },
+  joinedGroupContent: {
+    flex: 1,
+  },
+  joinedGroupName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0c1726',
+  },
+  joinedGroupOwner: {
+    fontSize: 13,
+    color: '#475569',
+    marginTop: 2,
+  },
+  joinedGroupEmail: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 1,
   },
 });
 

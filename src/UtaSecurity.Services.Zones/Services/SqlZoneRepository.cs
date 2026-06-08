@@ -52,15 +52,18 @@ END
             await schemaCommand.ExecuteNonQueryAsync();
 
             var seedSql = @"
-IF NOT EXISTS (SELECT 1 FROM dbo.Geofences WHERE Boundary IS NOT NULL)
-BEGIN
-    INSERT INTO dbo.Geofences (Id, Code, Name, Boundary, Latitude, Longitude, Radius)
-    VALUES
-        (NEWID(), 'Z1', 'FACULTAD DE INGENIERÍA', geography::STPolyFromText('POLYGON ((-78.625301 -1.266416, -78.624212 -1.26648, -78.624212 -1.268564, -78.62584 -1.268564, -78.625301 -1.266416))', 4326), -1.267490, -78.624756, 200),
-        (NEWID(), 'Z2', 'BIBLIOTECA GENERAL', geography::STPolyFromText('POLYGON ((-78.624212 -1.26648, -78.622994 -1.266555, -78.62264 -1.268564, -78.624212 -1.268564, -78.624212 -1.26648))', 4326), -1.267525, -78.623603, 200),
-        (NEWID(), 'Z3', 'RECTORADO / ADMINISTRACIÓN', geography::STPolyFromText('POLYGON ((-78.62584 -1.268564, -78.624212 -1.268564, -78.624212 -1.27065, -78.62638 -1.270376, -78.62584 -1.268564))', 4326), -1.269470, -78.625026, 200),
-        (NEWID(), 'Z4', 'COMPLEJO DEPORTIVO', geography::STPolyFromText('POLYGON ((-78.624212 -1.268564, -78.62264 -1.268564, -78.622289 -1.270935, -78.624212 -1.27065, -78.624212 -1.268564))', 4326), -1.269750, -78.623427, 200);
-END";
+MERGE INTO dbo.Geofences AS target
+USING (VALUES
+    ('Z1', 'FACULTAD DE INGENIERÍA', geography::STPolyFromText('POLYGON ((-78.625301 -1.266416, -78.624212 -1.26648, -78.624212 -1.268564, -78.62584 -1.268564, -78.625301 -1.266416))', 4326), -1.267490, -78.624756, 200),
+    ('Z2', 'BIBLIOTECA GENERAL', geography::STPolyFromText('POLYGON ((-78.624212 -1.26648, -78.622994 -1.266555, -78.62264 -1.268564, -78.624212 -1.268564, -78.624212 -1.26648))', 4326), -1.267525, -78.623603, 200),
+    ('Z3', 'RECTORADO / ADMINISTRACIÓN', geography::STPolyFromText('POLYGON ((-78.62584 -1.268564, -78.624212 -1.268564, -78.624212 -1.27065, -78.62638 -1.270376, -78.62584 -1.268564))', 4326), -1.269470, -78.625026, 200),
+    ('Z4', 'COMPLEJO DEPORTIVO', geography::STPolyFromText('POLYGON ((-78.624212 -1.268564, -78.62264 -1.268564, -78.622289 -1.270935, -78.624212 -1.27065, -78.624212 -1.268564))', 4326), -1.269750, -78.623427, 200),
+    ('Z5', 'FACULTAD DE CONTABILIDAD Y AUDITORÍA', geography::STPolyFromText('POLYGON ((-78.62500 -1.26820, -78.624212 -1.26820, -78.624212 -1.26940, -78.62500 -1.26940, -78.62500 -1.26820))', 4326), -1.268780, -78.624590, 100)
+) AS source (Code, Name, Boundary, Latitude, Longitude, Radius)
+ON target.Code = source.Code
+WHEN NOT MATCHED THEN
+    INSERT (Id, Code, Name, Boundary, Latitude, Longitude, Radius)
+    VALUES (NEWID(), source.Code, source.Name, source.Boundary, source.Latitude, source.Longitude, source.Radius);";
 
             await using var seedCommand = new SqlCommand(seedSql, connection);
             await seedCommand.ExecuteNonQueryAsync();
@@ -76,7 +79,7 @@ SELECT TOP 1 Code, Name
 FROM dbo.Geofences
 WHERE Boundary IS NOT NULL
   AND Boundary.STContains(geography::Point(@Lat, @Lng, 4326)) = 1
-ORDER BY Code;";
+ORDER BY Radius ASC, Code;";
 
             await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@Lat", lat);

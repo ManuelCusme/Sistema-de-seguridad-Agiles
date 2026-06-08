@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { TextInput, Button, Text, Surface, HelperText } from 'react-native-paper';
 import { useAuth } from '../context/AuthContext';
 
@@ -14,8 +14,26 @@ const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const [loadingLogin, setLoadingLogin] = useState(false);
+  const { login, user, loading } = useAuth();
+
+  useEffect(() => {
+    if (!loading && user) {
+      if (user.rol === 'Guardia') {
+        navigation.replace('Guard');
+      } else {
+        navigation.replace('Home');
+      }
+    }
+  }, [user, loading, navigation]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f3f6fb' }}>
+        <ActivityIndicator size="large" color="#4d82ff" />
+      </View>
+    );
+  }
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -23,11 +41,11 @@ const LoginScreen = ({ navigation }) => {
       return;
     }
 
-    setLoading(true);
+    setLoadingLogin(true);
     setError('');
 
     const result = await login(email.trim(), password);
-    setLoading(false);
+    setLoadingLogin(false);
 
     if (result.success) {
       const { user } = result;
@@ -60,22 +78,6 @@ const LoginScreen = ({ navigation }) => {
           </View>
         </View>
 
-        <Surface style={styles.officeCard}>
-          <View style={styles.officeRow}>
-            <View style={styles.microsoftMark}>
-              <View style={[styles.msSquare, { backgroundColor: '#f25022' }]} />
-              <View style={[styles.msSquare, { backgroundColor: '#7fba00' }]} />
-              <View style={[styles.msSquare, { backgroundColor: '#00a4ef' }]} />
-              <View style={[styles.msSquare, { backgroundColor: '#ffb900' }]} />
-            </View>
-            <View style={styles.officeTextBlock}>
-              <Text style={styles.officeLabel}>Microsoft Office 365</Text>
-              <Text style={styles.officeHint}>Acceso con credenciales institucionales</Text>
-            </View>
-          </View>
-        </Surface>
-
-        <Text style={styles.divider}>o</Text>
 
         <View style={styles.form}>
           <Text style={styles.fieldLabel}>Usuario</Text>
@@ -115,8 +117,8 @@ const LoginScreen = ({ navigation }) => {
             <Button
               mode="contained"
               onPress={handleLogin}
-              loading={loading}
-              disabled={loading}
+              loading={loadingLogin}
+              disabled={loadingLogin}
               style={styles.loginButton}
               contentStyle={styles.loginButtonContent}
             >
@@ -131,7 +133,7 @@ const LoginScreen = ({ navigation }) => {
                 setError('');
               }}
               style={styles.clearButton}
-              disabled={loading}
+              disabled={loadingLogin}
               contentStyle={styles.clearButtonContent}
             >
               Limpiar
@@ -181,26 +183,6 @@ const styles = StyleSheet.create({
   },
   headerBlock: {
     marginBottom: 12,
-  },
-  officeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 12,
-    width: '100%',
-    paddingHorizontal: 6,
-  },
-  microsoftMark: {
-    width: 22,
-    height: 22,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 2,
-  },
-  msSquare: {
-    width: 8,
-    height: 8,
-    margin: 0.5,
   },
   brandRow: {
     flexDirection: 'row',
@@ -252,34 +234,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontSize: 14,
     marginBottom: 4,
-  },
-  officeCard: {
-    marginTop: 16,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(77,130,255,0.20)',
-    backgroundColor: '#fbfdff',
-    elevation: 1,
-  },
-  officeLabel: {
-    color: '#111827',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  officeTextBlock: {
-    flex: 1,
-  },
-  officeHint: {
-    color: '#64748b',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  divider: {
-    textAlign: 'center',
-    color: '#94a3b8',
-    marginVertical: 10,
-    fontSize: 15,
   },
   form: {
     gap: 8,

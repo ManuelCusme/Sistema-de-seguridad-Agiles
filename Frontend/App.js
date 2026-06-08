@@ -1,5 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { Platform, LogBox } from 'react-native';
+
+LogBox.ignoreLogs([
+  'expo-notifications',
+  '`expo-notifications` functionality is not fully supported in Expo Go',
+  'Expo Go Android no soporta push remoto en SDK 53+'
+]);
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { PaperProvider } from 'react-native-paper';
@@ -87,7 +93,9 @@ export default function App() {
               incidenteId: data.incidenteId,
               zona: data.zona,
               tipo: data.tipo,
-              timestamp: data.timestamp
+              timestamp: data.timestamp,
+              latitude: data.latitude,
+              longitude: data.longitude,
             });
           }
         });

@@ -22,6 +22,20 @@ namespace UtaSecurity.Services.Incidents.Models
         public TrustGroupEntity? TrustGroup { get; set; }
     }
 
+    public class TrustGroupInviteEntity
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public Guid TrustGroupId { get; set; }
+        public Guid CreatedByUserId { get; set; }
+        public string Token { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime ExpiresAt { get; set; }
+        public DateTime? UsedAt { get; set; }
+        public Guid? UsedByUserId { get; set; }
+        public bool IsActive { get; set; } = true;
+        public TrustGroupEntity? TrustGroup { get; set; }
+    }
+
     public class TrustGroupCreateDto
     {
         public string usuId { get; set; } = string.Empty;
@@ -33,6 +47,18 @@ namespace UtaSecurity.Services.Incidents.Models
         public string usuId { get; set; } = string.Empty;
         public string memberUserId { get; set; } = string.Empty;
         public string memberEmail { get; set; } = string.Empty;
+    }
+
+    public class TrustGroupInviteCreateDto
+    {
+        public string usuId { get; set; } = string.Empty;
+        public int expiresInMinutes { get; set; } = 15;
+    }
+
+    public class TrustGroupInviteAcceptDto
+    {
+        public string usuId { get; set; } = string.Empty;
+        public string token { get; set; } = string.Empty;
     }
 
     // Lectura liviana de Users para resolver miembros por correo sin duplicar la lógica de Identity.

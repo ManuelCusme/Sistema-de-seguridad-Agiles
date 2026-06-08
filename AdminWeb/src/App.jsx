@@ -860,9 +860,43 @@ function App({ onLogout, session }) {
           incidentId,
           incidentStatus: location?.incidentStatus || location?.IncidentStatus || null,
           incidentMotivo: location?.incidentMotivo || location?.IncidentMotivo || null,
+          isOnDuty: true,
           updatedAt: parseBackendDate(location?.updatedAt || location?.UpdatedAt) || new Date(),
         },
       }));
+    });
+
+    connection.on('ReceiveGuardDutyUpdate', (status) => {
+      const guardId = String(status?.usuId || status?.guardiaId || '').trim().toLowerCase();
+      if (!guardId) return;
+
+      setGuardLocations((prev) => {
+        const current = prev[guardId];
+        if (!current && status?.enServicio === false) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [guardId]: {
+            ...(current || {
+              id: guardId,
+              name: resolveUserName(guardId),
+              pos: null,
+            }),
+            isOnDuty: status?.enServicio !== false,
+            updatedAt: parseBackendDate(status?.actualizadoEn) || new Date(),
+          },
+        };
+      });
+    });
+
+    connection.on('ReceiveGuardRoundUpdate', () => {
+      loadGuardRounds();
+    });
+
+    connection.on('ReceiveIncidentTypesChanged', () => {
+      loadIncidentTypes();
     });
 
     connection.start()
@@ -875,7 +909,7 @@ function App({ onLogout, session }) {
     };
   }, []);
 
-  const activeGuards = useMemo(() => Object.values(guardLocations), [guardLocations]);
+  const activeGuards = useMemo(() => Object.values(guardLocations).filter((guard) => guard.isOnDuty !== false && guard.pos), [guardLocations]);
   const activeIncidentTypes = useMemo(() => {
     const dynamicTypes = incidentTypes
       .filter((item) => item.activo !== false)
@@ -1804,7 +1838,6 @@ function AppWrapper() {
             ) : (
               <LoginScreen
                 onLogin={handleLogin}
-                demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }}
                 error={authError}
               />
             )

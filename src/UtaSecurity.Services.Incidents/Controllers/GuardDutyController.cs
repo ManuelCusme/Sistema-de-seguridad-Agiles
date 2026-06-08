@@ -56,6 +56,12 @@ namespace UtaSecurity.Services.Incidents.Controllers
 
             // HU-12: actualiza las conexiones vivas para que el filtro SignalR aplique sin relogin.
             await _connectionRegistry.SetGuardDutyAsync(guardUserId, status.IsOnDuty, _hubContext);
+            await _hubContext.Clients.Group(AlertConnectionRegistry.AdminsGroup).SendAsync("ReceiveGuardDutyUpdate", new
+            {
+                usuId = guardUserId,
+                enServicio = status.IsOnDuty,
+                actualizadoEn = status.UpdatedAt
+            });
 
             return Ok(new { success = true, usuId = guardUserId, enServicio = status.IsOnDuty, actualizadoEn = status.UpdatedAt });
         }

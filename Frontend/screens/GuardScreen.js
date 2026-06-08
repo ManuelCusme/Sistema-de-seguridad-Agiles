@@ -9,7 +9,9 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Alert,
+  RefreshControl
 } from 'react-native';
 import MapView, { Marker, Polygon, Polyline } from 'react-native-maps';
 import { Text, Title, Paragraph, Card, Surface, IconButton, Button } from 'react-native-paper';
@@ -21,13 +23,8 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { INCIDENT_CATALOG, getIncidentByValue, mapIncidentTypesFromApi } from '../constants/incidentCatalog';
 import { ALERTS_HUB_URL } from '../config/network';
-
-const CAMPUS_CENTER = {
-  latitude: -1.2687,
-  longitude: -78.6247,
-  latitudeDelta: 0.0035,
-  longitudeDelta: 0.0035,
-};
+import { scheduleIncidentLocalNotification } from '../utils/notifications';
+import { getWalkwayRoute, CAMPUS_CENTER } from '../utils/routing';
 
 // Coordenadas de las 4 Zonas UTA Huachi
 const ZONES = [
@@ -75,103 +72,20 @@ const ZONES = [
       { latitude: -1.27065, longitude: -78.624212 },
     ]
   },
+  { 
+    id: 'Z5', 
+    name: 'Zona 5', 
+    color: 'rgba(156, 39, 176, 0.3)',
+    coords: [
+      { latitude: -1.26820, longitude: -78.62500 },
+      { latitude: -1.26820, longitude: -78.624212 },
+      { latitude: -1.26940, longitude: -78.624212 },
+      { latitude: -1.26940, longitude: -78.62500 },
+    ]
+  },
 ];
 
-const WALKWAY_NODES = {
-  norteOeste: { latitude: -1.26662, longitude: -78.62508 },
-  norteCentro: { latitude: -1.26666, longitude: -78.62425 },
-  norteEste: { latitude: -1.26672, longitude: -78.62320 },
-  centroOeste: { latitude: -1.26818, longitude: -78.62535 },
-  centro: { latitude: -1.26848, longitude: -78.62422 },
-  centroEste: { latitude: -1.26850, longitude: -78.62308 },
-  surOeste: { latitude: -1.27022, longitude: -78.62582 },
-  surCentro: { latitude: -1.27042, longitude: -78.62420 },
-  surEste: { latitude: -1.27055, longitude: -78.62286 },
-};
 
-const WALKWAY_EDGES = [
-  ['norteOeste', 'norteCentro'],
-  ['norteCentro', 'norteEste'],
-  ['norteOeste', 'centroOeste'],
-  ['norteCentro', 'centro'],
-  ['norteEste', 'centroEste'],
-  ['centroOeste', 'centro'],
-  ['centro', 'centroEste'],
-  ['centroOeste', 'surOeste'],
-  ['centro', 'surCentro'],
-  ['centroEste', 'surEste'],
-  ['surOeste', 'surCentro'],
-  ['surCentro', 'surEste'],
-];
-
-const distanceBetween = (a, b) => {
-  const lat = (a.latitude - b.latitude) * 111320;
-  const lng = (a.longitude - b.longitude) * 111320 * Math.cos((a.latitude * Math.PI) / 180);
-  return Math.sqrt((lat * lat) + (lng * lng));
-};
-
-const findNearestWalkwayNode = (point) => {
-  return Object.entries(WALKWAY_NODES).reduce((nearest, [id, coord]) => {
-    const distance = distanceBetween(point, coord);
-    return !nearest || distance < nearest.distance ? { id, distance } : nearest;
-  }, null)?.id;
-};
-
-const getWalkwayRoute = (origin, destination) => {
-  if (!origin || !destination) {
-    return [];
-  }
-
-  const start = findNearestWalkwayNode(origin);
-  const end = findNearestWalkwayNode(destination);
-
-  if (!start || !end) {
-    return [origin, destination];
-  }
-
-  const graph = WALKWAY_EDGES.reduce((acc, [a, b]) => {
-    acc[a] = acc[a] || [];
-    acc[b] = acc[b] || [];
-    const weight = distanceBetween(WALKWAY_NODES[a], WALKWAY_NODES[b]);
-    acc[a].push({ id: b, weight });
-    acc[b].push({ id: a, weight });
-    return acc;
-  }, {});
-
-  const distances = Object.keys(WALKWAY_NODES).reduce((acc, id) => ({ ...acc, [id]: Infinity }), {});
-  const previous = {};
-  const pending = new Set(Object.keys(WALKWAY_NODES));
-  distances[start] = 0;
-
-  while (pending.size) {
-    const current = [...pending].sort((a, b) => distances[a] - distances[b])[0];
-    pending.delete(current);
-
-    if (current === end) break;
-
-    (graph[current] || []).forEach((neighbor) => {
-      const nextDistance = distances[current] + neighbor.weight;
-      if (nextDistance < distances[neighbor.id]) {
-        distances[neighbor.id] = nextDistance;
-        previous[neighbor.id] = current;
-      }
-    });
-  }
-
-  const pathIds = [];
-  let cursor = end;
-  while (cursor) {
-    pathIds.unshift(cursor);
-    if (cursor === start) break;
-    cursor = previous[cursor];
-  }
-
-  if (pathIds[0] !== start) {
-    return [origin, destination];
-  }
-
-  return [origin, ...pathIds.map((id) => WALKWAY_NODES[id]), destination];
-};
 
 const getZoneLabel = (zoneName = '') => {
   const normalized = String(zoneName).toUpperCase();
@@ -180,6 +94,7 @@ const getZoneLabel = (zoneName = '') => {
   if (normalized.includes('BIBLI')) return 'Zona 2';
   if (normalized.includes('RECTOR') || normalized.includes('ADMIN')) return 'Zona 3';
   if (normalized.includes('DEPOR')) return 'Zona 4';
+  if (normalized.includes('CONTAB') || normalized.includes('AUDIT')) return 'Zona 5';
 
   return 'Ubicación desconocida';
 };
@@ -228,10 +143,39 @@ const getIncidentRegion = (alert, currentLocation) => {
   };
 };
 
+const GUAYAQUIL_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+const parseBackendDate = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const text = String(value);
+  const hasTimeZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(text);
+  const date = new Date(hasTimeZone ? text : `${text}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const toGuayaquilDate = (value) => {
+  const date = parseBackendDate(value);
+  return date ? new Date(date.getTime() - GUAYAQUIL_OFFSET_MS) : null;
+};
+
+const formatTime = (value) => {
+  const date = toGuayaquilDate(value);
+  if (!date || Number.isNaN(date.getTime())) {
+    return 'No disponible';
+  }
+  return date.toLocaleTimeString('es-EC', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  });
+};
+
 const GuardScreen = () => {
   const { logout, user, token, API_URL } = useAuth();
   const navigation = useNavigation();
   const [alerts, setAlerts] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [isOnDuty, setIsOnDuty] = useState(true);
   const [loadingIncidents, setLoadingIncidents] = useState({}); // Track loading state per incident
   const [closingIncidents, setClosingIncidents] = useState({}); // Track closing state per incident
@@ -280,14 +224,15 @@ const GuardScreen = () => {
         enServicio: nextValue,
       });
     } catch (error) {
-      console.error('No se pudo actualizar el estado de servicio:', error.message);
+      console.warn('No se pudo actualizar el estado de servicio:', error.message);
       setIsOnDuty(!nextValue);
+      Alert.alert('Error', 'No se pudo cambiar el estado de servicio. Verifica tu conexión.');
     }
   };
 
   const mapIncident = (incidente) => {
     const catalogItem = getIncidentByValue(incidente.incMotivo || 'OTROS', incidentCatalog);
-    const timestamp = new Date(incidente.incFechaReporte || Date.now()).getTime();
+    const timestamp = parseBackendDate(incidente.incFechaReporte || Date.now())?.getTime() || Date.now();
     return {
       id: incidente.incId || Date.now().toString(),
       user: incidente.incReportadoPor || 'Estudiante',
@@ -298,7 +243,7 @@ const GuardScreen = () => {
       emoji: catalogItem.emoji,
       motivoKey: catalogItem.value,
       facultad: incidente.incFacultad || 'FISEI',
-      time: new Date(incidente.incFechaReporte || Date.now()).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' }),
+      time: formatTime(incidente.incFechaReporte),
       status: String(incidente.incEstado || incidente.incSeveridad || 'PENDIENTE').toUpperCase(),
       assignedBy: incidente.incAsignadoPor || null,
       assignedAt: incidente.incAsignadoEn || null,
@@ -316,7 +261,7 @@ const GuardScreen = () => {
       });
       setIncidentCatalog(mapIncidentTypesFromApi(response.data));
     } catch (error) {
-      console.error('No se pudieron cargar tipos de incidente:', error.message);
+      console.warn('No se pudieron cargar tipos de incidente:', error.message);
     }
   };
 
@@ -326,7 +271,7 @@ const GuardScreen = () => {
       const response = await axios.get(`${API_URL}/guard-duty/${myUserId}`);
       setIsOnDuty(response.data?.enServicio !== false);
     } catch (error) {
-      console.error('No se pudo cargar estado de servicio:', error.message);
+      console.warn('No se pudo cargar estado de servicio:', error.message);
     }
   };
 
@@ -339,7 +284,7 @@ const GuardScreen = () => {
       setRounds(items);
       setActiveRound(items.find((item) => item.estado === 'EN_CURSO') || null);
     } catch (error) {
-      console.error('No se pudieron cargar rondas:', error.message);
+      console.warn('No se pudieron cargar rondas:', error.message);
     } finally {
       setRoundLoading(false);
     }
@@ -355,7 +300,8 @@ const GuardScreen = () => {
       });
       await loadRounds();
     } catch (error) {
-      console.error('No se pudo iniciar ronda:', error.message);
+      console.warn('No se pudo iniciar ronda:', error.message);
+      Alert.alert('Error', 'No se pudo iniciar la ronda de vigilancia. Verifica tu conexión.');
     } finally {
       setRoundLoading(false);
     }
@@ -373,7 +319,8 @@ const GuardScreen = () => {
       setRoundObservation('');
       await loadRounds();
     } catch (error) {
-      console.error('No se pudo finalizar ronda:', error.message);
+      console.warn('No se pudo finalizar ronda:', error.message);
+      Alert.alert('Error', 'No se pudo finalizar la ronda de vigilancia.');
     } finally {
       setRoundLoading(false);
     }
@@ -449,7 +396,8 @@ const GuardScreen = () => {
         Vibration.vibrate(200);
       }
     } catch (error) {
-      console.error('Error al aceptar incidente:', error.message);
+      console.warn('Error al aceptar incidente:', error.message);
+      Alert.alert('Error', error?.response?.data?.error || 'No se pudo asumir el incidente en este momento.');
     } finally {
       // Remover estado de carga
       setLoadingIncidents(prev => ({
@@ -540,7 +488,8 @@ const GuardScreen = () => {
         handleCloseModalCancel();
       }
     } catch (error) {
-      console.error('Error al cerrar incidente:', error.message);
+      console.warn('Error al cerrar incidente:', error.message);
+      Alert.alert('Error', error?.response?.data?.error || 'No se pudo cerrar el incidente.');
     } finally {
       setClosingIncidents(prev => ({
         ...prev,
@@ -555,41 +504,47 @@ const GuardScreen = () => {
     loadRounds();
   }, [myUserId]);
 
+  const loadExistingAlerts = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/incidents`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+
+      const items = Array.isArray(response.data) ? response.data : [];
+      const mapped = items.map(mapIncident);
+
+      setAlerts((prev) => {
+        const merged = [...mapped];
+        prev.forEach((alert) => {
+          if (!merged.some((item) => item.id === alert.id)) {
+            merged.unshift(alert);
+          }
+        });
+        return merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      });
+    } catch (error) {
+      console.warn('Error cargando alertas iniciales:', error.message);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        loadExistingAlerts(),
+        loadDutyStatus(),
+        loadRounds(),
+        loadIncidentTypes(),
+      ]);
+    } catch (error) {
+      console.warn('Error al refrescar datos:', error.message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   useEffect(() => {
-    let mounted = true;
-
-    const loadExistingAlerts = async () => {
-      try {
-        const response = await axios.get(`${API_URL}/incidents`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
-
-        const items = Array.isArray(response.data) ? response.data : [];
-        const mapped = items
-          .map(mapIncident)
-          .filter((item) => item.status !== 'CERRADO');
-
-        if (!mounted) return;
-
-        setAlerts((prev) => {
-          const merged = [...mapped];
-          prev.forEach((alert) => {
-            if (!merged.some((item) => item.id === alert.id)) {
-              merged.unshift(alert);
-            }
-          });
-          return merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        });
-      } catch (error) {
-        console.error('Error cargando alertas iniciales:', error.message);
-      }
-    };
-
     loadExistingAlerts();
-
-    return () => {
-      mounted = false;
-    };
   }, [API_URL, token, incidentCatalog]);
 
   /**
@@ -626,11 +581,13 @@ const GuardScreen = () => {
         motivo:   catalogItem.label,
         motivoKey: catalogItem.value,
         facultad: incidente.incFacultad || 'FISEI',
-        time:     new Date().toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' }),
-        status:   'PENDIENTE' // Estado inicial
+        time:     formatTime(incidente.incFechaReporte || new Date()),
+        status:   'PENDIENTE', // Estado inicial
+        timestamp: parseBackendDate(incidente.incFechaReporte || new Date())?.getTime() || Date.now()
       };
       
       setAlerts(prev => [newAlert, ...prev]);
+      scheduleIncidentLocalNotification(incidente);
       Vibration.vibrate([0, 500, 200, 500]);
     });
 
@@ -654,7 +611,7 @@ const GuardScreen = () => {
 
     const startPromise = newConnection.start().catch(err => {
       if (!shouldStopAfterStart) {
-        console.error(err);
+        console.warn('Error en la conexión SignalR del guardia:', err?.message || err);
       }
     });
 
@@ -1044,7 +1001,14 @@ const GuardScreen = () => {
             </Card>
           </TouchableOpacity>
         )}
-        refreshControl={undefined}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#4d82ff']}
+            tintColor="#4d82ff"
+          />
+        }
       />
 
       {/* Modal para cerrar caso con observación */}

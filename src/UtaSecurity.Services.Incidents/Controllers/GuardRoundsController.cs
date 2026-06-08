@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using UtaSecurity.Services.Incidents.Data;
+using UtaSecurity.Services.Incidents.Hubs;
 using UtaSecurity.Services.Incidents.Models;
+using UtaSecurity.Services.Incidents.Services;
 
 namespace UtaSecurity.Services.Incidents.Controllers
 {
@@ -10,10 +13,12 @@ namespace UtaSecurity.Services.Incidents.Controllers
     public class GuardRoundsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly IHubContext<AlertHub> _hubContext;
 
-        public GuardRoundsController(ApplicationDbContext context)
+        public GuardRoundsController(ApplicationDbContext context, IHubContext<AlertHub> hubContext)
         {
             _context = context;
+            _hubContext = hubContext;
         }
 
         [HttpGet]
@@ -80,6 +85,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
             _context.GuardRounds.Add(round);
             await _context.SaveChangesAsync();
 
+            await NotifyRoundChangedAsync("started", round);
             return Ok(new { success = true, rondaId = round.Id, horaInicio = round.StartedAt, estado = round.Status });
         }
 
@@ -114,6 +120,8 @@ namespace UtaSecurity.Services.Incidents.Controllers
             round.Status = "FINALIZADA";
 
             await _context.SaveChangesAsync();
+            await NotifyRoundChangedAsync("finished", round);
+
             return Ok(new
             {
                 success = true,
@@ -121,6 +129,22 @@ namespace UtaSecurity.Services.Incidents.Controllers
                 horaFin = round.EndedAt,
                 duracionMinutos = round.DurationMinutes,
                 observacion = round.Observation
+            });
+        }
+
+        private Task NotifyRoundChangedAsync(string action, GuardRoundEntity round)
+        {
+            return _hubContext.Clients.Group(AlertConnectionRegistry.AdminsGroup).SendAsync("ReceiveGuardRoundUpdate", new
+            {
+                action,
+                rondaId = round.Id,
+                guardiaId = round.GuardUserId,
+                zona = round.Zone,
+                horaInicio = round.StartedAt,
+                horaFin = round.EndedAt,
+                observacion = round.Observation,
+                duracionMinutos = round.DurationMinutes,
+                estado = round.Status
             });
         }
     }

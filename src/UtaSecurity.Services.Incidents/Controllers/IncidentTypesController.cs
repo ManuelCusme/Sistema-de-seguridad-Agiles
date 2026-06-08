@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using UtaSecurity.Services.Incidents.Data;
+using UtaSecurity.Services.Incidents.Hubs;
 using UtaSecurity.Services.Incidents.Models;
 
 namespace UtaSecurity.Services.Incidents.Controllers
@@ -10,10 +12,12 @@ namespace UtaSecurity.Services.Incidents.Controllers
     public class IncidentTypesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly IHubContext<AlertHub> _hubContext;
 
-        public IncidentTypesController(ApplicationDbContext context)
+        public IncidentTypesController(ApplicationDbContext context, IHubContext<AlertHub> hubContext)
         {
             _context = context;
+            _hubContext = hubContext;
         }
 
         [HttpGet]
@@ -68,6 +72,8 @@ namespace UtaSecurity.Services.Incidents.Controllers
 
             _context.IncidentTypes.Add(type);
             await _context.SaveChangesAsync();
+
+            await NotifyIncidentTypesChangedAsync("created", type);
             return Ok(new { success = true, id = type.Id });
         }
 
@@ -100,6 +106,7 @@ namespace UtaSecurity.Services.Incidents.Controllers
             type.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
+            await NotifyIncidentTypesChangedAsync("updated", type);
             return Ok(new { success = true });
         }
 
@@ -116,7 +123,25 @@ namespace UtaSecurity.Services.Incidents.Controllers
             type.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
+            await NotifyIncidentTypesChangedAsync("deleted", type);
             return Ok(new { success = true });
+        }
+
+        private Task NotifyIncidentTypesChangedAsync(string action, IncidentTypeEntity type)
+        {
+            return _hubContext.Clients.All.SendAsync("ReceiveIncidentTypesChanged", new
+            {
+                action,
+                type = new
+                {
+                    id = type.Id,
+                    nombre = type.Name,
+                    codigo = type.Code,
+                    emoji = type.Emoji,
+                    color = type.Color,
+                    activo = type.IsActive
+                }
+            });
         }
 
         private static (string? Name, string? Code, string? Emoji, string? Color, string? Error) Normalize(IncidentTypeUpsertDto? request)

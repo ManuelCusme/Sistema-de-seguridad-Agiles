@@ -15,17 +15,32 @@ export const mapIncidentTypesFromApi = (items = []) => {
 
   const mapped = items
     .filter((item) => item?.activo !== false)
-    .map((item) => ({
-      label: item.nombre || item.label || 'Otros',
-      value: String(item.codigo || item.value || item.nombre || 'OTROS').toUpperCase(),
-      emoji: item.emoji || '🚨',
-      color: item.color || '#4d82ff',
-    }));
+    .map((item) => {
+      const name = item.nombre || item.label || 'Otros';
+      const rawCode = item.codigo || item.value || item.nombre || 'OTROS';
+      const code = String(rawCode)
+        .trim()
+        .replace(/[\s/\\-]+/g, '_')
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, ''); // Remove accents
+      return {
+        label: name,
+        value: code,
+        emoji: item.emoji || '🚨',
+        color: item.color || '#4d82ff',
+      };
+    });
 
   return mapped.length ? mapped : INCIDENT_CATALOG;
 };
 
 export const getIncidentByValue = (value, catalog = INCIDENT_CATALOG) => {
-  const normalized = String(value || '').toUpperCase();
+  const normalized = String(value || '')
+    .trim()
+    .replace(/[\s/\\-]+/g, '_')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ''); // Remove accents
   return (catalog || INCIDENT_CATALOG).find((item) => item.value === normalized) || INCIDENT_DEFAULT;
 };

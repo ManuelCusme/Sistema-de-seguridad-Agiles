@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
@@ -31,8 +32,9 @@ namespace UtaSecurity.Services.Incidents.Tests
             _mockHubContext = new Mock<IHubContext<AlertHub>>();
             var mockHubClients = new Mock<IHubClients>();
             _mockClientProxy = new Mock<IClientProxy>();
-            
+
             mockHubClients.Setup(clients => clients.All).Returns(_mockClientProxy.Object);
+            mockHubClients.Setup(clients => clients.Groups(It.IsAny<IReadOnlyList<string>>())).Returns(_mockClientProxy.Object);
             _mockHubContext.Setup(hub => hub.Clients).Returns(mockHubClients.Object);
 
             _mockHttpClientFactory = new Mock<IHttpClientFactory>();
@@ -92,7 +94,7 @@ namespace UtaSecurity.Services.Incidents.Tests
 
             // Assert
             Assert.IsType<OkObjectResult>(result);
-            
+
             var savedIncident = await _dbContext.Incidents.FirstOrDefaultAsync();
             Assert.NotNull(savedIncident);
             Assert.Equal("Ingeniería", savedIncident.Zona);
