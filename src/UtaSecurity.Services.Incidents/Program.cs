@@ -7,6 +7,7 @@
 using UtaSecurity.Services.Incidents.Hubs;
 using Microsoft.EntityFrameworkCore;
 using UtaSecurity.Services.Incidents.Data;
+using UtaSecurity.Services.Incidents.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,6 +20,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 // --- ACTIVAR SIGNALR PARA NOTIFICACIONES EN TIEMPO REAL ---
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<IAlertConnectionRegistry, AlertConnectionRegistry>();
 
 // --- REGISTRAR CLIENTE HTTP PARA MS-C DE ZONAS (TA-06.4) ---
 // El cliente "ZoneService" consume GET /zonas/detectar?lat=&lng= del microservicio de Manuel
@@ -29,6 +31,12 @@ builder.Services.AddHttpClient("ZoneService", client =>
     client.BaseAddress = new Uri(baseUrl);
     // Timeout estricto: el flujo de alerta NO puede bloquearse más de 400ms esperando la zona
     client.Timeout = TimeSpan.FromMilliseconds(400);
+});
+
+builder.Services.AddHttpClient("ExpoPush", client =>
+{
+    client.BaseAddress = new Uri("https://exp.host");
+    client.Timeout = TimeSpan.FromSeconds(5);
 });
 
 // --- POLÍTICA DE CORS PARA EL MICROSERVICIO ---
@@ -88,6 +96,91 @@ using (var scope = app.Services.CreateScope())
         BEGIN
             ALTER TABLE Incidents ADD Zona NVARCHAR(100) NOT NULL CONSTRAINT DF_Incidents_Zona DEFAULT 'No disponible';
         END;
+
+        IF OBJECT_ID('dbo.TrustGroups', 'U') IS NULL
+        BEGIN
+            CREATE TABLE TrustGroups (
+                Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+                OwnerUserId UNIQUEIDENTIFIER NOT NULL,
+                Name NVARCHAR(120) NOT NULL,
+                CreatedAt DATETIME NOT NULL CONSTRAINT DF_TrustGroups_CreatedAt DEFAULT GETDATE(),
+                IsActive BIT NOT NULL CONSTRAINT DF_TrustGroups_IsActive DEFAULT 1
+            );
+        END;
+
+        IF OBJECT_ID('dbo.TrustGroupMembers', 'U') IS NULL
+        BEGIN
+            CREATE TABLE TrustGroupMembers (
+                Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+                TrustGroupId UNIQUEIDENTIFIER NOT NULL,
+                MemberUserId UNIQUEIDENTIFIER NOT NULL,
+                CreatedAt DATETIME NOT NULL CONSTRAINT DF_TrustGroupMembers_CreatedAt DEFAULT GETDATE(),
+                IsActive BIT NOT NULL CONSTRAINT DF_TrustGroupMembers_IsActive DEFAULT 1,
+                CONSTRAINT FK_TrustGroupMembers_TrustGroups FOREIGN KEY (TrustGroupId) REFERENCES TrustGroups(Id)
+            );
+        END;
+
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_TrustGroupMembers_Group_User' AND object_id = OBJECT_ID('dbo.TrustGroupMembers'))
+        BEGIN
+            CREATE UNIQUE INDEX UX_TrustGroupMembers_Group_User ON TrustGroupMembers(TrustGroupId, MemberUserId);
+        END;
+
+        IF OBJECT_ID('dbo.GuardRounds', 'U') IS NULL
+        BEGIN
+            CREATE TABLE GuardRounds (
+                Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+                GuardUserId UNIQUEIDENTIFIER NOT NULL,
+                Zone NVARCHAR(100) NOT NULL,
+                StartedAt DATETIME NOT NULL CONSTRAINT DF_GuardRounds_StartedAt DEFAULT GETDATE(),
+                EndedAt DATETIME NULL,
+                Observation NVARCHAR(500) NULL,
+                DurationMinutes INT NULL,
+                Status NVARCHAR(20) NOT NULL CONSTRAINT DF_GuardRounds_Status DEFAULT 'EN_CURSO'
+            );
+        END;
+
+        IF OBJECT_ID('dbo.GuardDutyStatuses', 'U') IS NULL
+        BEGIN
+            CREATE TABLE GuardDutyStatuses (
+                GuardUserId UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+                IsOnDuty BIT NOT NULL CONSTRAINT DF_GuardDutyStatuses_IsOnDuty DEFAULT 1,
+                UpdatedAt DATETIME NOT NULL CONSTRAINT DF_GuardDutyStatuses_UpdatedAt DEFAULT GETDATE()
+            );
+        END;
+
+        IF OBJECT_ID('dbo.IncidentTypes', 'U') IS NULL
+        BEGIN
+            CREATE TABLE IncidentTypes (
+                Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY DEFAULT NEWID(),
+                Name NVARCHAR(100) NOT NULL,
+                Code NVARCHAR(60) NOT NULL,
+                Emoji NVARCHAR(20) NOT NULL,
+                Color NVARCHAR(20) NOT NULL,
+                IsActive BIT NOT NULL CONSTRAINT DF_IncidentTypes_IsActive DEFAULT 1,
+                CreatedAt DATETIME NOT NULL CONSTRAINT DF_IncidentTypes_CreatedAt DEFAULT GETDATE(),
+                UpdatedAt DATETIME NULL
+            );
+        END;
+
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_IncidentTypes_Code' AND object_id = OBJECT_ID('dbo.IncidentTypes'))
+        BEGIN
+            CREATE UNIQUE INDEX UX_IncidentTypes_Code ON IncidentTypes(Code);
+        END;
+
+        MERGE IncidentTypes AS target
+        USING (VALUES
+            ('Robo/Asalto', 'ROBO_ASALTO', NCHAR(0xD83D) + NCHAR(0xDCB0), '#ff4fa3'),
+            ('Arma blanca', 'ARMA_BLANCA', NCHAR(0xD83D) + NCHAR(0xDEE1), '#ef4444'),
+            ('Desmayo/Emergencia medica', 'DESMAYO_EMERGENCIA_MEDICA', NCHAR(0x2764), '#8f65ff'),
+            ('Amenaza', 'AMENAZA', NCHAR(0x26A0), '#f7c948'),
+            ('Otros', 'OTROS', NCHAR(0xD83D) + NCHAR(0xDEA8), '#4d82ff')
+        ) AS source (Name, Code, Emoji, Color)
+        ON target.Code = source.Code
+        WHEN MATCHED THEN
+            UPDATE SET target.Name = source.Name, target.Emoji = source.Emoji, target.Color = source.Color, target.IsActive = 1, target.UpdatedAt = GETDATE()
+        WHEN NOT MATCHED THEN
+            INSERT (Id, Name, Code, Emoji, Color, IsActive, CreatedAt)
+            VALUES (NEWID(), source.Name, source.Code, source.Emoji, source.Color, 1, GETDATE());
     ");
 }
 

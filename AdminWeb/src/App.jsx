@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as signalR from '@microsoft/signalr';
 import { MapContainer, Marker, Polygon, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { BarChart3, Bell, CircleAlert, Filter, Flame, HandCoins, HeartPulse, MapPin, Search, ShieldAlert, SlidersHorizontal, TriangleAlert } from 'lucide-react';
+import { BarChart3, Bell, CircleAlert, Filter, Flame, HandCoins, HeartPulse, ListChecks, MapPin, Search, ShieldAlert, SlidersHorizontal, Tags, TriangleAlert } from 'lucide-react';
 import axios from 'axios';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import 'leaflet/dist/leaflet.css';
@@ -170,6 +170,9 @@ const motiveColors = {
   INCENDIO: '#ef4444',
 };
 
+const RECENT_INCIDENT_HIGHLIGHT_MS = 15000;
+const RECENT_INCIDENT_COLOR = '#ef4444';
+
 const motiveGlyphs = {
   ROBO: '🦹',
   AGRESIÓN: '🛡️',
@@ -179,13 +182,14 @@ const motiveGlyphs = {
   INCENDIO: '🔥',
 };
 
-const createMarkerIcon = (motive) => {
+const createMarkerIcon = (motive, status, isRecent = false) => {
   const normalized = String(motive || 'EMERGENCIA').toUpperCase();
-  const color = motiveColors[normalized] || '#4d82ff';
+  const isAssigned = normalizeStatus(status) === 'Asignado';
+  const color = isRecent ? RECENT_INCIDENT_COLOR : (isAssigned ? '#4d82ff' : (motiveColors[normalized] || '#4d82ff'));
   const glyph = motiveGlyphs[normalized] || '📍';
 
   return L.divIcon({
-    className: 'incident-marker',
+    className: `incident-marker ${isRecent ? 'incident-marker--recent' : ''}`,
     html: `
       <span class="incident-marker__chip" style="background:${color}22;color:${color}">
         <span class="incident-marker__glyph">${glyph}</span>
@@ -193,6 +197,17 @@ const createMarkerIcon = (motive) => {
     `,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
+  });
+};
+
+const createGuardMarkerIcon = (guardName) => {
+  const initial = String(guardName || 'G').trim().charAt(0).toUpperCase() || 'G';
+
+  return L.divIcon({
+    className: 'guard-marker',
+    html: `<span class="guard-marker__chip">${initial}</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
   });
 };
 
@@ -300,16 +315,16 @@ const getTimelineConfig = (range) => {
 };
 
 const dashboardReferenceNow = Date.now();
-const DEFAULT_OPEN_ZOOM = 17;
+const DEFAULT_OPEN_ZOOM = 16;
 const CAMPUS_CENTER = { lat: -1.2687, lng: -78.6247 };
 const MAP_OPTIONS = {
   zoomControl: true,
   scrollWheelZoom: true,
   doubleClickZoom: true,
-  dragging: false,
+  dragging: true,
   touchZoom: true,
-  boxZoom: false,
-  keyboard: false,
+  boxZoom: true,
+  keyboard: true,
 };
 
 function RecenterMap({ resetKey }) {
@@ -408,6 +423,14 @@ function Tabs({ active, onChange }) {
         <BarChart3 size={16} />
         Estadísticas
       </button>
+      <button className={`tab ${active === 'rondas' ? 'tab--active' : ''}`} onClick={() => onChange('rondas')}>
+        <ListChecks size={16} />
+        Rondas
+      </button>
+      <button className={`tab ${active === 'tipos' ? 'tab--active' : ''}`} onClick={() => onChange('tipos')}>
+        <Tags size={16} />
+        Tipos
+      </button>
     </div>
   );
 }
@@ -476,6 +499,9 @@ function App({ onLogout, session }) {
   const [query, setQuery] = useState('');
   const [activeCoords, setActiveCoords] = useState(null);
   const [alertsDrawerOpen, setAlertsDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mapFiltersOpen, setMapFiltersOpen] = useState(false);
+  const [mapGuardsOpen, setMapGuardsOpen] = useState(false);
   const [statsFilterOpen, setStatsFilterOpen] = useState(false);
   const [statsScope, setStatsScope] = useState('all');
   const [statsRange, setStatsRange] = useState('7D');
@@ -490,6 +516,13 @@ function App({ onLogout, session }) {
   const [closeModalVisible, setCloseModalVisible] = useState(false);
   const [toast, setToast] = useState(null);
   const [userLookup, setUserLookup] = useState({});
+  const [guardLocations, setGuardLocations] = useState({});
+  const [guardRounds, setGuardRounds] = useState([]);
+  const [incidentTypes, setIncidentTypes] = useState([]);
+  const [typeForm, setTypeForm] = useState({ id: '', nombre: '', codigo: '', emoji: '🚨', color: '#4d82ff' });
+  const [typeSaving, setTypeSaving] = useState(false);
+  const [recentIncidentIds, setRecentIncidentIds] = useState({});
+  const recentIncidentTimersRef = useRef({});
 
   const showToast = (message, tone = 'success') => {
     setToast({ message, tone });
@@ -526,6 +559,86 @@ function App({ onLogout, session }) {
     setCloseTarget(alert);
     setCloseObservation('No se encuentra en la Universidad');
     setCloseModalVisible(true);
+  };
+
+  const loadGuardRounds = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/guard-rounds`);
+      setGuardRounds(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      showToast(`No se pudieron cargar rondas: ${error?.message || 'error desconocido'}`, 'error');
+    }
+  };
+
+  const loadIncidentTypes = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/incident-types`, {
+        params: { includeInactive: true },
+      });
+      setIncidentTypes(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      showToast(`No se pudieron cargar tipos: ${error?.message || 'error desconocido'}`, 'error');
+    }
+  };
+
+  const resetTypeForm = () => {
+    setTypeForm({ id: '', nombre: '', codigo: '', emoji: '🚨', color: '#4d82ff' });
+  };
+
+  const editIncidentType = (item) => {
+    setTypeForm({
+      id: item.id || '',
+      nombre: item.nombre || '',
+      codigo: item.codigo || '',
+      emoji: item.emoji || '🚨',
+      color: item.color || '#4d82ff',
+    });
+    setView('tipos');
+  };
+
+  const saveIncidentType = async () => {
+    const payload = {
+      nombre: typeForm.nombre.trim(),
+      codigo: typeForm.codigo.trim(),
+      emoji: typeForm.emoji.trim() || '🚨',
+      color: typeForm.color.trim() || '#4d82ff',
+    };
+
+    if (!payload.nombre) {
+      showToast('El nombre del tipo es obligatorio.', 'error');
+      return;
+    }
+
+    setTypeSaving(true);
+    try {
+      if (typeForm.id) {
+        await axios.put(`${API_BASE_URL}/api/incident-types/${typeForm.id}`, payload);
+      } else {
+        await axios.post(`${API_BASE_URL}/api/incident-types`, payload);
+      }
+      resetTypeForm();
+      await loadIncidentTypes();
+      showToast('Tipo de incidente guardado.');
+    } catch (error) {
+      const message = error?.response?.data?.error || error?.message || 'No se pudo guardar el tipo.';
+      showToast(message, 'error');
+    } finally {
+      setTypeSaving(false);
+    }
+  };
+
+  const deleteIncidentType = async (item) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/api/incident-types/${item.id}`);
+      await loadIncidentTypes();
+      if (typeForm.id === item.id) {
+        resetTypeForm();
+      }
+      showToast('Tipo desactivado correctamente.');
+    } catch (error) {
+      const message = error?.response?.data?.error || error?.message || 'No se pudo desactivar el tipo.';
+      showToast(message, 'error');
+    }
   };
 
   const handleCloseIncident = async () => {
@@ -592,6 +705,22 @@ function App({ onLogout, session }) {
     setAlertsDrawerOpen(false);
   };
 
+  const markIncidentAsRecent = (incidentId) => {
+    if (!incidentId) return;
+
+    window.clearTimeout(recentIncidentTimersRef.current[incidentId]);
+    setRecentIncidentIds((prev) => ({ ...prev, [incidentId]: true }));
+
+    recentIncidentTimersRef.current[incidentId] = window.setTimeout(() => {
+      setRecentIncidentIds((prev) => {
+        const next = { ...prev };
+        delete next[incidentId];
+        return next;
+      });
+      delete recentIncidentTimersRef.current[incidentId];
+    }, RECENT_INCIDENT_HIGHLIGHT_MS);
+  };
+
   useEffect(() => {
     const loadUsers = async () => {
       try {
@@ -631,6 +760,8 @@ function App({ onLogout, session }) {
           time: formatRelativeTime(item.incFechaReporte),
           timestamp: parseBackendDate(item.incFechaReporte) || new Date(),
           pos: { lat: item.incLatitud, lng: item.incLongitud },
+          assignedBy: item.incAsignadoPor || null,
+          assignedAt: parseBackendDate(item.incAsignadoEn),
           closedBy: item.incCerradoPor || null,
           closedAt: parseBackendDate(item.incCerradoEn),
           observation: item.incObservacion || '',
@@ -651,10 +782,12 @@ function App({ onLogout, session }) {
 
     loadUsers();
     loadIncidents();
+    loadGuardRounds();
+    loadIncidentTypes();
 
     const serverIp = window.location.hostname;
     const connection = new signalR.HubConnectionBuilder()
-      .withUrl(`http://${serverIp}:5000/hubs/alerts`)
+      .withUrl(`http://${serverIp}:5000/hubs/alerts?userId=${encodeURIComponent(session?.userId || '')}&role=Admin`)
       .withAutomaticReconnect()
       .build();
 
@@ -671,10 +804,16 @@ function App({ onLogout, session }) {
         pos: { lat: incident.incLatitud, lng: incident.incLongitud },
         closedBy: null,
         closedAt: null,
+        assignedBy: null,
+        assignedAt: null,
         observation: '',
       };
 
       setAlerts((prev) => [nextIncident, ...prev]);
+      markIncidentAsRecent(nextIncident.id);
+      setView('mapa');
+      setAlertsDrawerOpen(true);
+      setActiveCoords(nextIncident.pos);
 
       if (audioRef.current) {
         audioRef.current.play().catch(() => {});
@@ -692,19 +831,105 @@ function App({ onLogout, session }) {
           ...item,
           status: nextStatus,
           zone: normalizeZoneLabel(incident.incZona || item.zone, incident.incGeocercaNombre || item.zone),
-          closedBy: incident.incCerradoPor || item.closedBy || incident.incAsignadoPor || null,
+          assignedBy: incident.incAsignadoPor || item.assignedBy || null,
+          assignedAt: parseBackendDate(incident.incAsignadoEn) || item.assignedAt,
+          closedBy: incident.incCerradoPor || item.closedBy || null,
           closedAt: parseBackendDate(incident.incCerradoEn) || item.closedAt,
           observation: incident.incObservacion || item.observation,
         };
       }));
     });
 
+    connection.on('ReceiveGuardLocation', (location) => {
+      const guardId = String(location?.guardId || location?.GuardId || '').trim();
+      const latitude = Number(location?.latitude ?? location?.Latitude);
+      const longitude = Number(location?.longitude ?? location?.Longitude);
+
+      if (!guardId || Number.isNaN(latitude) || Number.isNaN(longitude)) {
+        return;
+      }
+
+      const incidentId = location?.incidentId ?? location?.IncidentId ?? null;
+
+      setGuardLocations((prev) => ({
+        ...prev,
+        [guardId.toLowerCase()]: {
+          id: guardId,
+          name: location?.guardName || location?.GuardName || guardId || 'Guardia',
+          pos: { lat: latitude, lng: longitude },
+          incidentId,
+          incidentStatus: location?.incidentStatus || location?.IncidentStatus || null,
+          incidentMotivo: location?.incidentMotivo || location?.IncidentMotivo || null,
+          isOnDuty: true,
+          updatedAt: parseBackendDate(location?.updatedAt || location?.UpdatedAt) || new Date(),
+        },
+      }));
+    });
+
+    connection.on('ReceiveGuardDutyUpdate', (status) => {
+      const guardId = String(status?.usuId || status?.guardiaId || '').trim().toLowerCase();
+      if (!guardId) return;
+
+      setGuardLocations((prev) => {
+        const current = prev[guardId];
+        if (!current && status?.enServicio === false) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [guardId]: {
+            ...(current || {
+              id: guardId,
+              name: resolveUserName(guardId),
+              pos: null,
+            }),
+            isOnDuty: status?.enServicio !== false,
+            updatedAt: parseBackendDate(status?.actualizadoEn) || new Date(),
+          },
+        };
+      });
+    });
+
+    connection.on('ReceiveGuardRoundUpdate', () => {
+      loadGuardRounds();
+    });
+
+    connection.on('ReceiveIncidentTypesChanged', () => {
+      loadIncidentTypes();
+    });
+
     connection.start()
       .then(() => setConnected(true))
       .catch(() => setConnected(false));
 
-    return () => connection.stop();
+    return () => {
+      Object.values(recentIncidentTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
+      connection.stop();
+    };
   }, []);
+
+  const activeGuards = useMemo(() => Object.values(guardLocations).filter((guard) => guard.isOnDuty !== false && guard.pos), [guardLocations]);
+  const activeIncidentTypes = useMemo(() => {
+    const dynamicTypes = incidentTypes
+      .filter((item) => item.activo !== false)
+      .map((item) => ({
+        value: String(item.codigo || '').toUpperCase(),
+        label: item.nombre || item.codigo,
+        color: item.color || '#4d82ff',
+        glyph: item.emoji || '🚨',
+      }))
+      .filter((item) => item.value);
+
+    const fallbackTypes = Object.keys(motiveColors).map((value) => ({
+      value,
+      label: value,
+      color: motiveColors[value],
+      glyph: motiveGlyphs[value] || '📍',
+    }));
+
+    return [...dynamicTypes, ...fallbackTypes.filter((fallback) => !dynamicTypes.some((item) => item.value === fallback.value))];
+  }, [incidentTypes]);
 
   const rangeFilteredAlerts = useMemo(() => {
     const limitMs = getRangeLimitMs(statsRange);
@@ -741,13 +966,6 @@ function App({ onLogout, session }) {
 
     return { active, assigned, closed, avgResponse };
   }, [alerts]);
-
-  const summaryStats = useMemo(() => ({
-    total: filteredAlerts.length,
-    active: filteredAlerts.filter((item) => item.status === 'Activo').length,
-    assigned: filteredAlerts.filter((item) => item.status === 'Asignado').length,
-    closed: filteredAlerts.filter((item) => item.status === 'Cerrado').length,
-  }), [filteredAlerts]);
 
   const statsRangeAlerts = useMemo(() => {
     const limitMs = getRangeLimitMs(statsRange);
@@ -872,10 +1090,13 @@ function App({ onLogout, session }) {
   }, [query, filterZone, filterMotivo, statsRange]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''}`}>
       <audio ref={audioRef} src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" />
 
       <aside className="sidebar">
+        <button className="sidebar-toggle sidebar-toggle--inside" type="button" onClick={() => setSidebarCollapsed(true)}>
+          Cerrar panel
+        </button>
         <div className="brand">
           <div className="brand__mark">UTA</div>
           <div>
@@ -896,69 +1117,64 @@ function App({ onLogout, session }) {
           <span>En línea</span>
           <strong>{connected ? 'SignalR activo' : 'Conectando...'}</strong>
         </div>
+
+        {onLogout && (
+          <div className="sidebar__footer">
+            <div className="user-chip user-chip--sidebar" title={`${session?.role || 'Sin rol'} · ${session?.email || ''}`}>
+              <span className="user-chip__avatar">{(session?.displayName || 'A').charAt(0).toUpperCase()}</span>
+              <div>
+                <strong>{session?.displayName || 'Usuario'}</strong>
+                <span>{session?.role || 'Admin'}</span>
+              </div>
+            </div>
+            <button className="sidebar-logout" type="button" onClick={onLogout} title="Cerrar sesión">Cerrar sesión</button>
+          </div>
+        )}
       </aside>
 
       <main className="workspace">
-        <header className="topbar">
+        {sidebarCollapsed && (
+          <button className="sidebar-toggle sidebar-toggle--floating" type="button" onClick={() => setSidebarCollapsed(false)}>
+            Abrir panel
+          </button>
+        )}
+        <header className={`topbar ${view === 'mapa' ? 'topbar--map' : ''}`}>
           <div>
             <h2>{view === 'mapa' ? 'Mapa operacional' : 'Estadísticas del campus'}</h2>
-            <p>{view === 'mapa' ? 'Zonas, filtros e incidencias en tiempo real' : 'Resumen, tendencias y distribución de incidentes'}</p>
+            {view !== 'mapa' && <p>Resumen, tendencias y distribución de incidentes</p>}
           </div>
 
           <div className="topbar__actions">
-            {onLogout && (
-              <div className="user-chip" title={`${session?.role || 'Sin rol'} · ${session?.email || ''}`}>
-                <span className="user-chip__avatar">{(session?.displayName || 'A').charAt(0).toUpperCase()}</span>
-                <div>
-                  <strong>{session?.displayName || 'Usuario'}</strong>
-                  <span>{session?.role || 'Admin'}</span>
-                </div>
-              </div>
-            )}
             <label className="searchbox">
               <Search size={16} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar..." />
             </label>
+            {view === 'mapa' && (
+              <button className="ghost-btn" type="button" onClick={() => setMapFiltersOpen((value) => !value)}>
+                <Filter size={16} />
+                Filtros
+              </button>
+            )}
+            {view === 'mapa' && (
+              <button className="ghost-btn" type="button" onClick={() => setMapGuardsOpen((value) => !value)}>
+                <ShieldAlert size={16} />
+                Guardias
+              </button>
+            )}
             <button className="ghost-btn" type="button" onClick={() => setAlertsDrawerOpen((value) => !value)}>
               <Bell size={16} />
-              Alertas
+              Incidencias
             </button>
-            {onLogout && <button className="ghost-btn" type="button" onClick={onLogout} title="Cerrar sesión">Cerrar sesión</button>}
           </div>
         </header>
 
         {view === 'mapa' && (
           <section className="layout layout--map">
-            <div className="summary-grid">
-              <StatCard title="Incidentes visibles" value={summaryStats.total} detail={`Activos: ${summaryStats.active} · Asignados: ${summaryStats.assigned}`} tone="accent" />
-              <StatCard title="Respuesta media" value={stats.avgResponse} detail="Según el filtro activo" />
-              <StatCard title="Casos cerrados" value={summaryStats.closed} detail="Historial filtrado" />
-              <StatCard title="Zonas vigiladas" value="4" detail="Campus Huachi" tone="soft" />
-            </div>
-
-            <div className="content-grid">
-              <section className="panel panel--map">
-                <div className="panel__header">
-                  <div>
-                    <h3>Mapa del campus</h3>
-                    <p>Polígonos, zonas y marcador de incidentes activos</p>
-                  </div>
-                  <div className="legend">
-                    {zones.map((zone) => (
-                      <span key={zone.id}><i style={{ background: zone.color }} /> {zone.label}</span>
-                    ))}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" className="ghost-btn ghost-btn--small" onClick={() => {
-                      setActiveCoords(null);
-                      setMapResetKey((k) => k + 1);
-                    }}>Recentrar mapa</button>
-                  </div>
-                </div>
-
+            <div className="map-workspace">
+              <section className="panel panel--map panel--map-focus">
                 <div className="map-shell">
-                    <MapContainer center={[CAMPUS_CENTER.lat, CAMPUS_CENTER.lng]} zoom={DEFAULT_OPEN_ZOOM} className="map" {...MAP_OPTIONS}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <MapContainer center={[CAMPUS_CENTER.lat, CAMPUS_CENTER.lng]} zoom={DEFAULT_OPEN_ZOOM} maxZoom={18} wheelPxPerZoomLevel={90} className="map" {...MAP_OPTIONS}>
+                    <TileLayer maxZoom={18} maxNativeZoom={18} url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                       <RecenterMap resetKey={mapResetKey} />
                       {activeCoords && <FocusMap coords={activeCoords} />}
 
@@ -970,16 +1186,35 @@ function App({ onLogout, session }) {
                       </Polygon>
                     ))}
 
-                    {filteredAlerts.map((alert) => (
-                      <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]} icon={createMarkerIcon(alert.motivo)}>
+                    {filteredAlerts.map((alert) => {
+                      const isRecent = Boolean(recentIncidentIds[alert.id]);
+
+                      return (
+                        <Marker key={alert.id} position={[alert.pos.lat, alert.pos.lng]} icon={createMarkerIcon(alert.motivo, alert.status, isRecent)}>
+                          <Popup>
+                            <div className="popup-card">
+                              <div className="popup-card__header">
+                                <IncidentIcon motive={alert.motivo} />
+                                <strong>{alert.motivo}</strong>
+                              </div>
+                              <p>{alert.user}</p>
+                              <span>{alert.zone}</span>
+                            </div>
+                          </Popup>
+                        </Marker>
+                      );
+                    })}
+
+                    {activeGuards.map((guard) => (
+                      <Marker key={guard.id} position={[guard.pos.lat, guard.pos.lng]} icon={createGuardMarkerIcon(guard.name)}>
                         <Popup>
                           <div className="popup-card">
                             <div className="popup-card__header">
-                              <IncidentIcon motive={alert.motivo} />
-                              <strong>{alert.motivo}</strong>
+                              <span className="guard-popup-icon">G</span>
+                              <strong>{guard.name}</strong>
                             </div>
-                            <p>{alert.user}</p>
-                            <span>{alert.zone}</span>
+                            <p>Incidencia activa: {guard.incidentId || 'Sin asignación reportada'}</p>
+                            <span>{guard.incidentMotivo || guard.incidentStatus || 'Seguimiento en vivo'}</span>
                           </div>
                         </Popup>
                       </Marker>
@@ -988,17 +1223,27 @@ function App({ onLogout, session }) {
                 </div>
               </section>
 
-              <aside className="panel panel--side">
-                <div className="panel__header panel__header--stacked">
-                  <div>
-                    <h3>Filtros</h3>
-                    <p>Refina por zona, tipo y búsqueda</p>
-                  </div>
-                  <div className="filter-badge">
-                    <Filter size={14} /> Activos
-                  </div>
+              <div className="map-floating map-floating--legend">
+                <div className="legend">
+                  {zones.map((zone) => (
+                    <span key={zone.id}><i style={{ background: zone.color }} /> {zone.label}</span>
+                  ))}
                 </div>
+                <button type="button" className="ghost-btn ghost-btn--small" onClick={() => {
+                  setActiveCoords(null);
+                  setMapResetKey((k) => k + 1);
+                }}>Recentrar mapa</button>
+              </div>
 
+              {mapFiltersOpen && (
+                <div className="map-floating map-floating--filters">
+                  <div className="map-floating__header">
+                    <strong>Filtros</strong>
+                    <button type="button" onClick={() => setMapFiltersOpen(false)}>Cerrar</button>
+                  </div>
+                  <button type="button" className="filter-reset-btn" onClick={clearFilters}>
+                    Todo por defecto
+                  </button>
                 <div className="filters">
                   <label>
                     Zona
@@ -1013,24 +1258,55 @@ function App({ onLogout, session }) {
                     Tipo
                     <select value={filterMotivo} onChange={(e) => setFilterMotivo(e.target.value)}>
                       <option value="TODOS">Todos</option>
-                      <option value="EMERGENCIA">Emergencia</option>
-                      <option value="ROBO">Robo</option>
-                      <option value="SOSPECHOSO">Sospechoso</option>
-                      <option value="MEDICO">Médico</option>
-                      <option value="INCENDIO">Incendio</option>
-                      <option value="AGRESIÓN">Agresión</option>
+                      {activeIncidentTypes.map((type) => (
+                        <option key={type.value} value={type.value}>{type.label}</option>
+                      ))}
                     </select>
                   </label>
                 </div>
+                </div>
+              )}
 
-                <div className="incident-list">
+              {mapGuardsOpen && (
+              <div className="map-floating map-floating--guards">
+                <div className="map-floating__header">
+                  <strong>Guardias activos</strong>
+                  <button type="button" onClick={() => setMapGuardsOpen(false)}>Cerrar</button>
+                </div>
+                <div className="guard-list">
                   <div className="incident-list__header">
-                    <h3>Incidencias recientes</h3>
+                    <h3>En mapa</h3>
+                    <span>{activeGuards.length}</span>
+                  </div>
+                  {activeGuards.map((guard) => (
+                    <article key={guard.id} className="guard-card">
+                      <span className="guard-card__avatar">{guard.name.charAt(0).toUpperCase()}</span>
+                      <div>
+                        <strong>{guard.name}</strong>
+                        <p>{guard.incidentId ? `Atiende ${guard.incidentId}` : 'Disponible / sin incidencia activa'}</p>
+                        <small>{formatRelativeTime(guard.updatedAt)}</small>
+                      </div>
+                    </article>
+                  ))}
+                  {activeGuards.length === 0 && <p className="empty-state">Aún no hay guardias reportando ubicación.</p>}
+                </div>
+              </div>
+              )}
+
+              {alertsDrawerOpen && (
+                <div className="map-floating map-floating--incidents">
+                  <div className="map-floating__header">
+                    <strong>Incidencias</strong>
+                    <button type="button" onClick={() => setAlertsDrawerOpen(false)}>Cerrar</button>
+                  </div>
+                <div className="incident-list incident-list--floating">
+                  <div className="incident-list__header">
+                    <h3>Recientes</h3>
                     <span>{filteredAlerts.length}</span>
                   </div>
 
-                  {filteredAlerts.map((alert) => (
-                    <article key={alert.id} className="incident-card" onClick={() => focusAlert(alert)}>
+                  {filteredAlerts.slice(0, 12).map((alert) => (
+                    <article key={alert.id} className={`incident-card ${alert.status === 'Asignado' ? 'incident-card--assigned' : ''} ${recentIncidentIds[alert.id] ? 'incident-card--recent' : ''}`} onClick={() => focusAlert(alert)}>
                       <div className="incident-card__top">
                         <span className="incident-card__tag">
                           <IncidentIcon motive={alert.motivo} />
@@ -1040,6 +1316,9 @@ function App({ onLogout, session }) {
                       </div>
                       <strong>{alert.user}</strong>
                       <p>{alert.faculty} · {alert.zone}</p>
+                      <p className={alert.assignedBy ? 'incident-card__assigned-guard' : ''}>
+                        Guardia asignado: {alert.assignedBy ? resolveUserName(alert.assignedBy) : 'Sin asignar'}
+                      </p>
                       <div className="incident-card__footer">
                         <small>{alert.time}</small>
                         <button type="button" className="incident-card__dismiss" onClick={(e) => {
@@ -1055,7 +1334,8 @@ function App({ onLogout, session }) {
                   {loadingIncidents && <p className="empty-state">Cargando incidencias reales...</p>}
                   {!loadingIncidents && filteredAlerts.length === 0 && <p className="empty-state">No hay incidencias que coincidan con los filtros.</p>}
                 </div>
-              </aside>
+                </div>
+              )}
             </div>
           </section>
         )
@@ -1122,9 +1402,9 @@ function App({ onLogout, session }) {
           <section className="layout layout--stats">
             <div className="summary-grid">
               <StatCard title="Total incidentes" value={statsAlerts.length} detail={statsScope === 'active' ? 'Solo casos abiertos' : 'Incluye cerrados y asignados'} tone="accent" />
-              <StatCard title="Casos activos" value={statsAlerts.filter((item) => item.status === 'Activo').length} detail="Siguen abiertos" />
+              <StatCard title="Respuesta media" value={stats.avgResponse} detail="Según el rango seleccionado" />
               <StatCard title="Casos cerrados" value={statsAlerts.filter((item) => item.status === 'Cerrado').length} detail="Con seguimiento completo" />
-              <StatCard title="Guardias en línea" value="7" detail="Conectados al sistema" tone="soft" />
+              <StatCard title="Guardias en línea" value={activeGuards.length} detail="Reportando ubicación en vivo" tone="soft" />
             </div>
 
             <div className="stats-toolbar">
@@ -1168,16 +1448,16 @@ function App({ onLogout, session }) {
 
             {statsFilterOpen && (
               <div className="stats-filters-panel">
+                <button type="button" className="filter-reset-btn filter-reset-btn--wide" onClick={clearFilters}>
+                  Todo por defecto
+                </button>
                 <label>
                   Tipo
                   <select value={filterMotivo} onChange={(e) => setFilterMotivo(e.target.value)}>
                     <option value="TODOS">Todos</option>
-                    <option value="EMERGENCIA">Emergencia</option>
-                    <option value="ROBO">Robo</option>
-                    <option value="SOSPECHOSO">Sospechoso</option>
-                    <option value="MEDICO">Médico</option>
-                    <option value="INCENDIO">Incendio</option>
-                    <option value="AGRESIÓN">Agresión</option>
+                      {activeIncidentTypes.map((type) => (
+                        <option key={type.value} value={type.value}>{type.label}</option>
+                      ))}
                   </select>
                 </label>
                 <label>
@@ -1233,6 +1513,100 @@ function App({ onLogout, session }) {
                 </div>
 
                 <TimelineBars values={timelineBreakdown} variant={timelineConfig.variant} />
+              </section>
+            </div>
+          </section>
+        )}
+
+        {view === 'rondas' && (
+          <section className="layout layout--history">
+            <div className="summary-grid">
+              <StatCard title="Rondas totales" value={guardRounds.length} detail="Todos los guardias" tone="accent" />
+              <StatCard title="En curso" value={guardRounds.filter((item) => item.estado === 'EN_CURSO').length} detail="Recorridos activos" />
+              <StatCard title="Finalizadas" value={guardRounds.filter((item) => item.estado === 'FINALIZADA').length} detail="Con observacion registrada" tone="soft" />
+            </div>
+
+            <section className="panel panel--wide">
+              <div className="panel__header">
+                <div>
+                  <h3>Rondas de guardias</h3>
+                  <p>Historial operativo de inicio, cierre, duracion y observacion obligatoria.</p>
+                </div>
+                <button type="button" className="ghost-btn ghost-btn--small" onClick={loadGuardRounds}>Actualizar</button>
+              </div>
+              <div className="table-list">
+                {guardRounds.map((round) => (
+                  <article key={round.rondaId} className="table-row-card">
+                    <div>
+                      <strong>{round.zona}</strong>
+                      <p>Guardia: {resolveUserName(round.guardiaId)}</p>
+                    </div>
+                    <div>
+                      <span className={`incident-card__status incident-card__status--${String(round.estado || '').toLowerCase().replace(/\s+/g, '-')}`}>{round.estado}</span>
+                      <p>{formatLocalDateTime(round.horaInicio)} - {round.horaFin ? formatLocalDateTime(round.horaFin) : 'En curso'}</p>
+                    </div>
+                    <div>
+                      <strong>{round.duracionMinutos ?? 0} min</strong>
+                      <p>{round.observacion || 'Sin observacion de cierre'}</p>
+                    </div>
+                  </article>
+                ))}
+                {guardRounds.length === 0 && <p className="empty-state">No hay rondas registradas.</p>}
+              </div>
+            </section>
+          </section>
+        )}
+
+        {view === 'tipos' && (
+          <section className="layout layout--history">
+            <div className="summary-grid">
+              <StatCard title="Tipos activos" value={incidentTypes.filter((item) => item.activo !== false).length} detail="Disponibles en la app movil" tone="accent" />
+              <StatCard title="Tipos inactivos" value={incidentTypes.filter((item) => item.activo === false).length} detail="Soft delete" />
+            </div>
+
+            <div className="content-grid">
+              <section className="panel">
+                <div className="panel__header">
+                  <div>
+                    <h3>{typeForm.id ? 'Editar tipo' : 'Crear tipo'}</h3>
+                    <p>El codigo es el valor que consumen la app movil y los filtros.</p>
+                  </div>
+                </div>
+                <div className="type-form">
+                  <label>Nombre<input value={typeForm.nombre} onChange={(e) => setTypeForm((prev) => ({ ...prev, nombre: e.target.value }))} placeholder="Robo/Asalto" /></label>
+                  <label>Codigo<input value={typeForm.codigo} onChange={(e) => setTypeForm((prev) => ({ ...prev, codigo: e.target.value.toUpperCase() }))} placeholder="ROBO_ASALTO" /></label>
+                  <label>Icono<input value={typeForm.emoji} onChange={(e) => setTypeForm((prev) => ({ ...prev, emoji: e.target.value }))} placeholder="🚨" /></label>
+                  <label>Color<input type="color" value={typeForm.color} onChange={(e) => setTypeForm((prev) => ({ ...prev, color: e.target.value }))} /></label>
+                  <div className="type-form__actions">
+                    <button type="button" className="primary-btn" onClick={saveIncidentType} disabled={typeSaving}>{typeSaving ? 'Guardando...' : 'Guardar'}</button>
+                    <button type="button" className="ghost-btn" onClick={resetTypeForm}>Limpiar</button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="panel panel--wide">
+                <div className="panel__header">
+                  <div>
+                    <h3>Tipos de incidente</h3>
+                    <p>CRUD administrativo con eliminacion logica.</p>
+                  </div>
+                  <button type="button" className="ghost-btn ghost-btn--small" onClick={loadIncidentTypes}>Actualizar</button>
+                </div>
+                <div className="type-grid">
+                  {incidentTypes.map((item) => (
+                    <article key={item.id} className={`type-card ${item.activo === false ? 'type-card--inactive' : ''}`}>
+                      <span className="type-card__icon" style={{ background: `${item.color || '#4d82ff'}22`, color: item.color || '#4d82ff' }}>{item.emoji || '🚨'}</span>
+                      <strong>{item.nombre}</strong>
+                      <p>{item.codigo}</p>
+                      <small>{item.activo === false ? 'Inactivo' : 'Activo'}</small>
+                      <div className="type-card__actions">
+                        <button type="button" className="ghost-btn ghost-btn--small" onClick={() => editIncidentType(item)}>Editar</button>
+                        {item.activo !== false && <button type="button" className="ghost-btn ghost-btn--small" onClick={() => deleteIncidentType(item)}>Eliminar</button>}
+                      </div>
+                    </article>
+                  ))}
+                  {incidentTypes.length === 0 && <p className="empty-state">No hay tipos registrados.</p>}
+                </div>
               </section>
             </div>
           </section>
@@ -1307,7 +1681,7 @@ function App({ onLogout, session }) {
           </div>
         )}
 
-        {alertsDrawerOpen && (
+        {alertsDrawerOpen && view !== 'mapa' && (
           <aside className="alerts-drawer">
             <div className="alerts-drawer__header">
               <div>
@@ -1464,7 +1838,6 @@ function AppWrapper() {
             ) : (
               <LoginScreen
                 onLogin={handleLogin}
-                demoCreds={{ user: ADMIN_USER, pass: ADMIN_PASS }}
                 error={authError}
               />
             )
