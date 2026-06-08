@@ -1,0 +1,11 @@
+{
+  "appId": "com.utasecurity.mobile",
+  "appName": "Seguridad UTA",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

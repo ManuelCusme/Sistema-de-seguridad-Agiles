@@ -1,0 +1,34 @@
+{
+  "name": "uta-security-mobile-ionic",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "cap:add:android": "cap add android",
+    "cap:sync": "cap sync android",
+    "android:open": "cap open android",
+    "apk:debug": "npm run build && cap sync android && cd android && gradlew.bat assembleDebug",
+    "apk:release": "npm run build && cap sync android && cd android && gradlew.bat assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/core": "^7.4.4",
+    "@ionic/react": "^8.7.6",
+    "@ionic/react-router": "^8.7.6",
+    "@microsoft/signalr": "^8.0.0",
+    "axios": "^1.7.9",
+    "ionicons": "^7.4.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^5.3.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.4",
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^7.1.12"
+  }
+}
