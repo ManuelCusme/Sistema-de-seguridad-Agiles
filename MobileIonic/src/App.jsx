@@ -52,6 +52,8 @@ import {
   shieldCheckmarkOutline,
   timeOutline,
 } from 'ionicons/icons';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import * as signalR from '@microsoft/signalr';
 import QRCode from 'qrcode';
 
@@ -60,6 +62,7 @@ import { api, apiUrl, getApiBaseUrl, getErrorMessage, hubUrl, setApiBaseUrl } fr
 import { formatDateTime } from './utils/date.js';
 
 const AuthContext = createContext(null);
+const INCIDENT_NOTIFICATION_CHANNEL = 'incidents';
 
 const initialRegisterForm = {
   nombre1: '',
@@ -71,6 +74,64 @@ const initialRegisterForm = {
   birthDate: '2000-01-01',
   facultad: 'FISEI',
 };
+
+async function ensureLocalNotificationsReady() {
+  if (!Capacitor.isNativePlatform()) {
+    return false;
+  }
+
+  try {
+    let permission = await LocalNotifications.checkPermissions();
+    if (permission.display !== 'granted') {
+      permission = await LocalNotifications.requestPermissions();
+    }
+
+    if (permission.display !== 'granted') {
+      return false;
+    }
+
+    if (Capacitor.getPlatform() === 'android') {
+      await LocalNotifications.createChannel({
+        id: INCIDENT_NOTIFICATION_CHANNEL,
+        name: 'Incidencias UTA',
+        description: 'Alertas de seguridad recibidas en tiempo real',
+        importance: 5,
+        visibility: 1,
+        vibration: true,
+        lights: true,
+        lightColor: '#0b3354',
+      });
+    }
+
+    return true;
+  } catch (error) {
+    console.warn('No se pudieron preparar notificaciones locales:', error);
+    return false;
+  }
+}
+
+async function showIncidentNotification(title, body, incident = {}) {
+  const ready = await ensureLocalNotificationsReady();
+  if (!ready) {
+    return;
+  }
+
+  await LocalNotifications.schedule({
+    notifications: [
+      {
+        id: Math.floor(Date.now() % 2147483647),
+        title,
+        body,
+        channelId: INCIDENT_NOTIFICATION_CHANNEL,
+        extra: {
+          incidentId: incident.incId || incident.id || '',
+          latitude: incident.incLatitud || incident.latitude || '',
+          longitude: incident.incLongitud || incident.longitude || '',
+        },
+      },
+    ],
+  });
+}
 
 function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem('utaSecurityToken') || '');
@@ -274,6 +335,15 @@ function SettingsPage() {
     setToast('Servidor guardado.');
   };
 
+  const testNotification = async () => {
+    await showIncidentNotification(
+      'Notificaciones activas',
+      'El APK ya puede mostrar alertas de Seguridad UTA.',
+      { incId: 'test' }
+    );
+    setToast('Notificacion de prueba enviada.');
+  };
+
   return (
     <Shell
       title="Servidor"
@@ -287,6 +357,7 @@ function SettingsPage() {
           <p className="muted">En APK usa la IP de la computadora donde corre el gateway, por ejemplo http://192.168.0.5:5000.</p>
           <IonInput label="API base" labelPlacement="stacked" value={value} onIonInput={(e) => setValue(e.detail.value || '')} />
           <IonButton expand="block" onClick={save}>Guardar</IonButton>
+          <IonButton fill="outline" expand="block" onClick={testNotification}>Probar notificacion</IonButton>
           <IonButton fill="outline" expand="block" routerLink="/login">Volver al login</IonButton>
         </section>
       </main>
@@ -335,6 +406,7 @@ function StudentPage() {
   const [holdActive, setHoldActive] = useState(false);
   const [toast, setToast] = useState('');
   const holdTimerRef = useRef(null);
+  const studentConnectionRef = useRef(null);
 
   const myUserId = user?.id || '';
 
@@ -359,9 +431,44 @@ function StudentPage() {
 
   useEffect(() => {
     if (!token) return;
+    ensureLocalNotificationsReady();
     loadHistory().catch(() => {});
     loadTrustGroups().catch(() => {});
   }, [token, loadHistory, loadTrustGroups]);
+
+  useEffect(() => {
+    if (!myUserId) return undefined;
+
+    const separator = hubUrl('/hubs/alerts').includes('?') ? '&' : '?';
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(`${hubUrl('/hubs/alerts')}${separator}userId=${encodeURIComponent(myUserId)}&role=Estudiante`)
+      .withAutomaticReconnect()
+      .build();
+
+    studentConnectionRef.current = connection;
+
+    connection.on('ReceiveAlert', (incident) => {
+      if (!incident?.incId || String(incident.incUsuarioId || '') === String(myUserId)) {
+        return;
+      }
+
+      const catalogItem = getIncidentByValue(incident.incMotivo, catalog);
+      showIncidentNotification(
+        'Alerta de tu grupo de confianza',
+        `${incident.incReportadoPor || 'Un estudiante'} activo ${catalogItem.label} en ${incident.incZona || 'zona no disponible'}.`,
+        incident
+      );
+      setToast('Alerta recibida de tu grupo de confianza.');
+    });
+
+    connection.start().catch(() => {});
+
+    return () => {
+      studentConnectionRef.current = null;
+      connection.off('ReceiveAlert');
+      connection.stop().catch(() => {});
+    };
+  }, [myUserId, catalog]);
 
   useEffect(() => () => {
     if (holdTimerRef.current) {
@@ -672,6 +779,7 @@ function GuardPage() {
   }, [loadAlerts, loadDuty, loadRounds, loadCatalog]);
 
   useEffect(() => {
+    ensureLocalNotificationsReady();
     refreshAll().catch(() => {});
   }, [refreshAll]);
 
@@ -683,7 +791,15 @@ function GuardPage() {
       .withAutomaticReconnect()
       .build();
     connectionRef.current = connection;
-    connection.on('ReceiveAlert', (incident) => setAlerts((current) => [mapIncident(incident), ...current.filter((item) => item.incId !== incident.incId)]));
+    connection.on('ReceiveAlert', (incident) => {
+      const mapped = mapIncident(incident);
+      setAlerts((current) => [mapped, ...current.filter((item) => item.incId !== incident.incId)]);
+      showIncidentNotification(
+        'Nueva alerta de seguridad',
+        `${getIncidentByValue(incident.incMotivo, catalog).label} en ${incident.incZona || incident.incGeocercaNombre || 'zona no disponible'}.`,
+        incident
+      );
+    });
     connection.on('ReceiveIncidentUpdate', (update) => {
       setAlerts((current) => current.map((item) => item.incId === update.incId ? mapIncident({ ...item, ...update }) : item));
     });
@@ -693,7 +809,7 @@ function GuardPage() {
       connection.off('ReceiveIncidentUpdate');
       connection.stop().catch(() => {});
     };
-  }, [myUserId, mapIncident]);
+  }, [myUserId, mapIncident, catalog]);
 
   const toggleDuty = async () => {
     const next = !isOnDuty;

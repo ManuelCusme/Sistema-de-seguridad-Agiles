@@ -55,7 +55,25 @@ http://192.168.1.20:5000
 
 Nota: en Android no se debe usar `localhost`, porque `localhost` apunta al propio celular, no a la computadora donde corre el backend.
 
-## 4. Credenciales de prueba
+## 4. Notificaciones en APK
+
+La app solicita permiso de notificaciones al iniciar sesion y crea el canal Android "Incidencias UTA".
+
+Para probarlas:
+
+1. Abrir "Configurar servidor".
+2. Presionar "Probar notificacion".
+3. Aceptar el permiso de notificaciones si Android lo solicita.
+4. Verificar que aparezca la notificacion "Notificaciones activas".
+
+Las notificaciones reales se muestran cuando:
+
+- Un guardia recibe una nueva alerta por SignalR.
+- Un estudiante recibe una alerta de un grupo de confianza por SignalR.
+
+Nota: estas son notificaciones locales disparadas por la conexion en tiempo real de la app. Para recibir alertas con la app completamente cerrada se requiere integrar push remoto con Firebase Cloud Messaging.
+
+## 5. Credenciales de prueba
 
 Estudiantes:
 
@@ -77,7 +95,7 @@ Administrador:
 admin@uta.edu.ec / admin123
 ```
 
-## 5. Flujo del estudiante
+## 6. Flujo del estudiante
 
 ### Iniciar sesion
 
@@ -119,7 +137,7 @@ POST /api/incidents
 3. Mostrar el QR o copiar la invitacion.
 4. El otro usuario puede pegar el token o URL en "Unirse a un grupo".
 
-## 6. Flujo del guardia
+## 7. Flujo del guardia
 
 ### Ver alertas
 
@@ -162,7 +180,7 @@ POST /api/incidents/close
 3. Presionar "Iniciar ronda".
 4. Para finalizar, escribir observacion y presionar "Finalizar ronda".
 
-## 7. Compilacion para desarrolladores
+## 8. Compilacion para desarrolladores
 
 Desde la carpeta:
 
@@ -200,7 +218,7 @@ Salida esperada:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## 8. Prompt base para otro modelo LLM
+## 9. Prompt base para otro modelo LLM
 
 Usar este contexto si se necesita pedir a otro modelo que mejore la app:
 
