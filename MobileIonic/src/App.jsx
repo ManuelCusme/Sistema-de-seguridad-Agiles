@@ -332,7 +332,9 @@ function StudentPage() {
   const [invite, setInvite] = useState(null);
   const [inviteQr, setInviteQr] = useState('');
   const [inviteTokenInput, setInviteTokenInput] = useState('');
+  const [holdActive, setHoldActive] = useState(false);
   const [toast, setToast] = useState('');
+  const holdTimerRef = useRef(null);
 
   const myUserId = user?.id || '';
 
@@ -361,6 +363,12 @@ function StudentPage() {
     loadTrustGroups().catch(() => {});
   }, [token, loadHistory, loadTrustGroups]);
 
+  useEffect(() => () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+    }
+  }, []);
+
   useEffect(() => {
     if (!invite?.token) {
       setInviteQr('');
@@ -370,6 +378,8 @@ function StudentPage() {
   }, [invite]);
 
   const sendAlert = async () => {
+    if (busy) return;
+    setHoldActive(false);
     setBusy(true);
     try {
       const coords = await getCurrentPosition();
@@ -388,6 +398,23 @@ function StudentPage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const startAlertHold = (event) => {
+    event.preventDefault();
+    if (busy || holdTimerRef.current) return;
+    setHoldActive(true);
+    holdTimerRef.current = setTimeout(() => {
+      holdTimerRef.current = null;
+      sendAlert();
+    }, 3000);
+  };
+
+  const cancelAlertHold = () => {
+    if (!holdTimerRef.current) return;
+    clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+    setHoldActive(false);
   };
 
   const createGroup = async () => {
@@ -489,10 +516,22 @@ function StudentPage() {
             <IonSelect label="Motivo" labelPlacement="stacked" value={motivo} onIonChange={(e) => setMotivo(e.detail.value)}>
               {catalog.map((item) => <IonSelectOption key={item.value} value={item.value}>{item.label}</IonSelectOption>)}
             </IonSelect>
-            <button className="panic-button" type="button" disabled={busy} onClick={sendAlert}>
-              {busy ? <IonSpinner name="crescent" /> : <><IonIcon icon={alertCircleOutline} /> ALERTA</>}
+            <button
+              className={`panic-button ${holdActive ? 'panic-button-holding' : ''}`}
+              type="button"
+              disabled={busy}
+              onPointerDown={startAlertHold}
+              onPointerUp={cancelAlertHold}
+              onPointerCancel={cancelAlertHold}
+              onPointerLeave={cancelAlertHold}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              <span className="panic-progress" />
+              <span className="panic-content">
+                {busy ? <IonSpinner name="crescent" /> : <><IonIcon icon={alertCircleOutline} /> Mantener 3s</>}
+              </span>
             </button>
-            <p className="muted">La app solicita ubicacion GPS y envia el incidente al gateway C#.</p>
+            <p className="muted">Mantén presionado 3 segundos. Si sueltas antes, la alerta se cancela.</p>
           </section>
         )}
 

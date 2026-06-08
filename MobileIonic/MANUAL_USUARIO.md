@@ -89,9 +89,10 @@ admin@uta.edu.ec / admin123
 
 1. Entrar en la pestana "Alerta".
 2. Seleccionar el motivo del incidente.
-3. Presionar el boton rojo "ALERTA".
-4. Aceptar el permiso de ubicacion.
-5. La app envia latitud, longitud, motivo, usuario y facultad al endpoint:
+3. Mantener presionado el boton rojo durante 3 segundos.
+4. Si se suelta antes de los 3 segundos, la alerta se cancela y no se envia.
+5. Aceptar el permiso de ubicacion.
+6. La app envia latitud, longitud, motivo, usuario y facultad al endpoint:
 
 ```text
 POST /api/incidents
