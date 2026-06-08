@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const API_BASE_STORAGE_KEY = 'utaSecurityApiBaseUrl';
-const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.0.5:5000';
+const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://10.79.25.95:5000';
 
 export const getApiBaseUrl = () => localStorage.getItem(API_BASE_STORAGE_KEY) || DEFAULT_API_BASE_URL;
 

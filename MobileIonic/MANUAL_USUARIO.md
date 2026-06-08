@@ -34,10 +34,10 @@ Pasos:
 
 La app debe apuntar al gateway C# del sistema.
 
-Valor por defecto:
+Valor por defecto en este APK:
 
 ```text
-http://192.168.0.5:5000
+http://10.79.25.95:5000
 ```
 
 Si la IP de la computadora cambia:
