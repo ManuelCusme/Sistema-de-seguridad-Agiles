@@ -8,6 +8,7 @@ import '@ionic/react/css/structure.css';
 import '@ionic/react/css/typography.css';
 import '@ionic/react/css/padding.css';
 import '@ionic/react/css/flex-utils.css';
+import 'leaflet/dist/leaflet.css';
 import './theme.css';
 
 import App from './App.jsx';

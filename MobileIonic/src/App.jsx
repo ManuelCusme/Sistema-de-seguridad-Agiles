@@ -56,12 +56,14 @@ import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import L from 'leaflet';
 import * as signalR from '@microsoft/signalr';
 import QRCode from 'qrcode';
 
 import { INCIDENT_CATALOG, INCIDENT_DEFAULT, getIncidentByValue, mapIncidentTypesFromApi } from './data/incidentCatalog.js';
 import { api, apiUrl, getApiBaseUrl, getErrorMessage, hubUrl, setApiBaseUrl } from './services/api.js';
 import { formatDateTime } from './utils/date.js';
+import { CAMPUS_CENTER, CAMPUS_ZONES, getWalkwayRoute } from './utils/routing.js';
 
 const AuthContext = createContext(null);
 const INCIDENT_NOTIFICATION_CHANNEL = 'incidents';
@@ -1074,6 +1076,110 @@ function GuardPage() {
   );
 }
 
+function createMapMarker(label, className) {
+  return L.divIcon({
+    className: `leaflet-app-marker ${className}`,
+    html: `<span>${label}</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
+}
+
+function toLatLng(point) {
+  return [Number(point.latitude), Number(point.longitude)];
+}
+
+function LeafletIncidentMap({ incidentPosition, routeOrigin, guardLocation }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const layerRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+
+    mapRef.current = L.map(containerRef.current, {
+      zoomControl: true,
+      attributionControl: false,
+    }).setView(toLatLng(CAMPUS_CENTER), 17);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(mapRef.current);
+
+    setTimeout(() => mapRef.current?.invalidateSize(), 250);
+
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !incidentPosition) return;
+
+    if (layerRef.current) {
+      layerRef.current.remove();
+    }
+
+    const group = L.layerGroup();
+    layerRef.current = group;
+
+    CAMPUS_ZONES.forEach((zone) => {
+      L.polygon(zone.coords.map(toLatLng), {
+        color: zone.color,
+        fillColor: zone.color,
+        fillOpacity: 0.14,
+        weight: 2,
+      })
+        .bindTooltip(zone.name, { permanent: false })
+        .addTo(group);
+    });
+
+    L.marker(toLatLng(incidentPosition), {
+      icon: createMapMarker('!', 'incident'),
+    })
+      .bindPopup('Incidente reportado')
+      .addTo(group);
+
+    if (routeOrigin) {
+      L.marker(toLatLng(routeOrigin), {
+        icon: createMapMarker('YO', 'origin'),
+      })
+        .bindPopup('Ubicacion de referencia')
+        .addTo(group);
+
+      const route = getWalkwayRoute(routeOrigin, incidentPosition);
+      if (route.length > 1) {
+        L.polyline(route.map(toLatLng), {
+          color: '#2f6bff',
+          weight: 5,
+          opacity: 0.92,
+        }).addTo(group);
+      }
+    }
+
+    if (guardLocation) {
+      L.marker(toLatLng(guardLocation), {
+        icon: createMapMarker('G', 'guard'),
+      })
+        .bindPopup(guardLocation.guardName || 'Guardia en ruta')
+        .addTo(group);
+    }
+
+    group.addTo(map);
+    const boundsPoints = [incidentPosition, routeOrigin, guardLocation].filter(Boolean).map(toLatLng);
+    map.fitBounds(L.latLngBounds(boundsPoints), { padding: [28, 28], maxZoom: 18 });
+    setTimeout(() => map.invalidateSize(), 120);
+
+    return () => {
+      group.remove();
+    };
+  }, [incidentPosition, routeOrigin, guardLocation]);
+
+  return <div className="leaflet-incident-map" ref={containerRef} />;
+}
+
 function IncidentDetailPage() {
   const history = useHistory();
   const { user } = useAuth();
@@ -1098,11 +1204,7 @@ function IncidentDetailPage() {
   const routeMapsUrl = lat && lng
     ? `https://www.google.com/maps/dir/?api=1${routeOrigin ? `&origin=${routeOrigin.latitude},${routeOrigin.longitude}` : ''}&destination=${lat},${lng}`
     : '';
-  const embedMapsUrl = lat && lng
-    ? routeOrigin
-      ? `https://maps.google.com/maps?saddr=${routeOrigin.latitude},${routeOrigin.longitude}&daddr=${lat},${lng}&z=17&output=embed`
-      : `https://maps.google.com/maps?q=${lat},${lng}&z=18&output=embed`
-    : '';
+  const incidentPosition = lat && lng ? { latitude: lat, longitude: lng } : null;
 
   useEffect(() => {
     if (!id) return undefined;
@@ -1159,11 +1261,7 @@ function IncidentDetailPage() {
             <InfoRow label="Coordenadas" value={lat && lng ? `${lat}, ${lng}` : 'No disponible'} />
             {currentPosition ? <InfoRow label="Tu ubicacion" value={`${currentPosition.latitude}, ${currentPosition.longitude}`} /> : null}
             {guardLocation ? <InfoRow label="Guardia en ruta" value={`${guardLocation.guardName}: ${guardLocation.latitude}, ${guardLocation.longitude}`} /> : null}
-            {embedMapsUrl ? (
-              <div className="map-embed">
-                <iframe title="Mapa del incidente" src={embedMapsUrl} loading="lazy" />
-              </div>
-            ) : null}
+            {incidentPosition ? <LeafletIncidentMap incidentPosition={incidentPosition} routeOrigin={routeOrigin} guardLocation={guardLocation} /> : null}
             <IonButton expand="block" fill="outline" onClick={locate}><IonIcon icon={locateOutline} slot="start" />Obtener mi ubicacion</IonButton>
             {pointMapsUrl ? <IonButton expand="block" fill="outline" href={pointMapsUrl} target="_blank"><IonIcon icon={mapOutline} slot="start" />Abrir coordenadas en Google Maps</IonButton> : null}
             {routeMapsUrl ? <IonButton expand="block" href={routeMapsUrl} target="_blank"><IonIcon icon={mapOutline} slot="start" />Abrir ruta en Google Maps</IonButton> : null}
@@ -1267,11 +1365,44 @@ function RequireAuth({ children, role }) {
   return children;
 }
 
+function NotificationNavigator() {
+  const history = useHistory();
+
+  useEffect(() => {
+    let active = true;
+    let listener;
+
+    const setup = async () => {
+      if (!Capacitor.isNativePlatform()) return;
+
+      listener = await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+        const incidentId = event?.notification?.extra?.incidentId;
+        if (!incidentId || incidentId === 'test') return;
+        history.push(`/incident/${incidentId}`);
+      });
+
+      if (!active) {
+        listener.remove();
+      }
+    };
+
+    setup();
+
+    return () => {
+      active = false;
+      listener?.remove();
+    };
+  }, [history]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <IonApp>
       <AuthProvider>
         <IonReactRouter>
+          <NotificationNavigator />
           <IonRouterOutlet>
             <Route exact path="/login" component={LoginPage} />
             <Route exact path="/register" component={RegisterPage} />

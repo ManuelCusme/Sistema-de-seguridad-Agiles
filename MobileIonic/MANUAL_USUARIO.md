@@ -129,8 +129,10 @@ POST /api/incidents
 1. Entrar en "Historial".
 2. Ver los incidentes reportados por el usuario.
 3. Presionar "Ver detalle" para abrir datos del incidente.
-4. Revisar coordenadas exactas, mapa embebido y botones de Google Maps.
-5. Si un guardia acepto el incidente y esta publicando ubicacion, se muestra "Guardia en ruta" con sus coordenadas.
+4. Revisar coordenadas exactas y mapa interno Leaflet con zonas del campus.
+5. Usar "Obtener mi ubicacion" para dibujar ruta peatonal interna hacia el incidente.
+6. Usar los botones de Google Maps si se necesita abrir coordenadas o ruta fuera de la app.
+7. Si un guardia acepto el incidente y esta publicando ubicacion, se muestra "Guardia en ruta" con sus coordenadas y marcador en el mapa.
 
 ### Crear grupo de confianza
 
@@ -171,6 +173,7 @@ POST /api/incidents/accept
 
 3. El incidente queda en estado ASIGNADO.
 4. La app publica la ubicacion GPS del guardia por SignalR para que otros clientes puedan ver el guardia en ruta.
+5. Al tocar una notificacion de alerta, la app abre el detalle del incidente para ver el mapa Leaflet y las opciones de Google Maps.
 
 ### Cerrar incidente
 
