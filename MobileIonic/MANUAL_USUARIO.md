@@ -71,6 +71,14 @@ Las notificaciones reales se muestran cuando:
 - Un guardia recibe una nueva alerta por SignalR.
 - Un estudiante recibe una alerta de un grupo de confianza por SignalR.
 
+Las alertas usan sonido, vibracion y canal Android de importancia alta. Si no suena, revisar en Android:
+
+1. Ajustes del telefono.
+2. Aplicaciones.
+3. Seguridad UTA.
+4. Notificaciones.
+5. Activar el canal "Incidencias UTA" con sonido.
+
 Nota: estas son notificaciones locales disparadas por la conexion en tiempo real de la app. Para recibir alertas con la app completamente cerrada se requiere integrar push remoto con Firebase Cloud Messaging.
 
 ## 5. Credenciales de prueba
@@ -120,7 +128,9 @@ POST /api/incidents
 
 1. Entrar en "Historial".
 2. Ver los incidentes reportados por el usuario.
-3. Presionar "Ver detalle" para abrir datos del incidente y ruta en Maps.
+3. Presionar "Ver detalle" para abrir datos del incidente.
+4. Revisar coordenadas exactas, mapa embebido y botones de Google Maps.
+5. Si un guardia acepto el incidente y esta publicando ubicacion, se muestra "Guardia en ruta" con sus coordenadas.
 
 ### Crear grupo de confianza
 
@@ -129,6 +139,7 @@ POST /api/incidents
 3. Presionar "Crear grupo".
 4. Seleccionar el grupo creado.
 5. Agregar miembros por correo o ID.
+6. Para eliminar un integrante, presionar "Eliminar" junto a su nombre.
 
 ### Invitar por QR/token
 
@@ -159,6 +170,7 @@ POST /api/incidents/accept
 ```
 
 3. El incidente queda en estado ASIGNADO.
+4. La app publica la ubicacion GPS del guardia por SignalR para que otros clientes puedan ver el guardia en ruta.
 
 ### Cerrar incidente
 

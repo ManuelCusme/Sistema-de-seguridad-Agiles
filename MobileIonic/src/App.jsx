@@ -53,6 +53,8 @@ import {
   timeOutline,
 } from 'ionicons/icons';
 import { Capacitor } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import * as signalR from '@microsoft/signalr';
 import QRCode from 'qrcode';
@@ -91,6 +93,12 @@ async function ensureLocalNotificationsReady() {
     }
 
     if (Capacitor.getPlatform() === 'android') {
+      try {
+        await LocalNotifications.deleteChannel({ id: INCIDENT_NOTIFICATION_CHANNEL });
+      } catch {
+        // The channel may not exist yet.
+      }
+
       await LocalNotifications.createChannel({
         id: INCIDENT_NOTIFICATION_CHANNEL,
         name: 'Incidencias UTA',
@@ -98,6 +106,7 @@ async function ensureLocalNotificationsReady() {
         importance: 5,
         visibility: 1,
         vibration: true,
+        sound: 'default',
         lights: true,
         lightColor: '#0b3354',
       });
@@ -123,6 +132,7 @@ async function showIncidentNotification(title, body, incident = {}) {
         title,
         body,
         channelId: INCIDENT_NOTIFICATION_CHANNEL,
+        sound: 'default',
         extra: {
           incidentId: incident.incId || incident.id || '',
           latitude: incident.incLatitud || incident.latitude || '',
@@ -131,6 +141,23 @@ async function showIncidentNotification(title, body, incident = {}) {
       },
     ],
   });
+}
+
+async function alertFeedback() {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      await Haptics.impact({ style: ImpactStyle.Heavy });
+      setTimeout(() => Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {}), 450);
+    }
+  } catch {
+    // Haptics are optional.
+  }
+
+  try {
+    navigator.vibrate?.([700, 180, 700, 180, 1000]);
+  } catch {
+    // Vibration is optional.
+  }
 }
 
 function AuthProvider({ children }) {
@@ -341,6 +368,7 @@ function SettingsPage() {
       'El APK ya puede mostrar alertas de Seguridad UTA.',
       { incId: 'test' }
     );
+    await alertFeedback();
     setToast('Notificacion de prueba enviada.');
   };
 
@@ -458,6 +486,7 @@ function StudentPage() {
         `${incident.incReportadoPor || 'Un estudiante'} activo ${catalogItem.label} en ${incident.incZona || 'zona no disponible'}.`,
         incident
       );
+      alertFeedback();
       setToast('Alerta recibida de tu grupo de confianza.');
     });
 
@@ -554,6 +583,25 @@ function StudentPage() {
       setToast('Miembro agregado.');
     } catch (error) {
       setToast(getErrorMessage(error, 'No se pudo agregar el miembro.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeTrustMember = async (groupId, memberId, memberName) => {
+    if (!groupId || !memberId) return;
+    const confirmed = window.confirm(`¿Eliminar a ${memberName || 'este integrante'} del grupo?`);
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      await api.delete(apiUrl(`/trust-groups/${groupId}/members/${memberId}`), {
+        params: { usuId: myUserId },
+      });
+      await loadTrustGroups();
+      setToast('Integrante eliminado.');
+    } catch (error) {
+      setToast(getErrorMessage(error, 'No se pudo eliminar el integrante.'));
     } finally {
       setBusy(false);
     }
@@ -695,6 +743,16 @@ function StudentPage() {
                     <IonItem key={member.id}>
                       <IonIcon icon={peopleOutline} slot="start" />
                       <IonLabel>{member.nombre}<p>{member.email || member.usuId}</p></IonLabel>
+                      <IonButton
+                        slot="end"
+                        size="small"
+                        color="danger"
+                        fill="clear"
+                        disabled={busy}
+                        onClick={() => removeTrustMember(group.id, member.id, member.nombre)}
+                      >
+                        Eliminar
+                      </IonButton>
                     </IonItem>
                   ))}
                 </IonList>
@@ -778,6 +836,30 @@ function GuardPage() {
     await Promise.all([loadAlerts(), loadDuty(), loadRounds(), loadCatalog()]);
   }, [loadAlerts, loadDuty, loadRounds, loadCatalog]);
 
+  const publishGuardLocation = useCallback(async (incident) => {
+    if (!incident || !myUserId) return;
+
+    try {
+      const coords = await getCurrentPosition();
+      const connection = connectionRef.current;
+      if (connection?.state !== signalR.HubConnectionState.Connected) {
+        return;
+      }
+
+      await connection.invoke('UpdateGuardLocation', {
+        guardId: myUserId,
+        guardName: [user?.Nombre1, user?.Apellido1].filter(Boolean).join(' ') || user?.email || 'Guardia',
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        incidentId: incident.incId || null,
+        incidentStatus: incident.incEstado || incident.incSeveridad || null,
+        incidentMotivo: incident.incMotivo || null,
+      });
+    } catch (error) {
+      console.warn('No se pudo publicar ubicacion del guardia:', error?.message || error);
+    }
+  }, [myUserId, user]);
+
   useEffect(() => {
     ensureLocalNotificationsReady();
     refreshAll().catch(() => {});
@@ -799,6 +881,7 @@ function GuardPage() {
         `${getIncidentByValue(incident.incMotivo, catalog).label} en ${incident.incZona || incident.incGeocercaNombre || 'zona no disponible'}.`,
         incident
       );
+      alertFeedback();
     });
     connection.on('ReceiveIncidentUpdate', (update) => {
       setAlerts((current) => current.map((item) => item.incId === update.incId ? mapIncident({ ...item, ...update }) : item));
@@ -826,6 +909,7 @@ function GuardPage() {
     setBusy(true);
     try {
       await api.post(apiUrl('/incidents/accept'), { incId: item.incId, usuId: myUserId });
+      await publishGuardLocation({ ...item, incEstado: 'ASIGNADO', incAsignadoPor: myUserId });
       await loadAlerts();
       setToast('Incidente asignado.');
     } catch (error) {
@@ -892,6 +976,18 @@ function GuardPage() {
   const historyAlerts = alerts.filter((item) => item.incEstado === 'CERRADO' || String(item.incAsignadoPor || '') === myUserId);
   const visibleAlerts = active === 'history' ? historyAlerts : activeAlerts;
   const activeRound = rounds.find((round) => round.estado === 'EN_CURSO');
+  const activeTrackingIncident = activeAlerts.find((item) => item.incEstado === 'ASIGNADO' && String(item.incAsignadoPor || '') === String(myUserId)) || null;
+
+  useEffect(() => {
+    if (!activeTrackingIncident) return undefined;
+
+    publishGuardLocation(activeTrackingIncident);
+    const intervalId = setInterval(() => {
+      publishGuardLocation(activeTrackingIncident);
+    }, 15000);
+
+    return () => clearInterval(intervalId);
+  }, [activeTrackingIncident, publishGuardLocation]);
 
   const exit = () => {
     logout();
@@ -980,10 +1076,12 @@ function GuardPage() {
 
 function IncidentDetailPage() {
   const history = useHistory();
+  const { user } = useAuth();
   const { id } = useParams();
   const item = history.location.state?.item;
   const [incident, setIncident] = useState(item || null);
   const [currentPosition, setCurrentPosition] = useState(null);
+  const [guardLocation, setGuardLocation] = useState(null);
 
   useEffect(() => {
     if (incident) return;
@@ -995,7 +1093,49 @@ function IncidentDetailPage() {
 
   const lat = Number(incident?.incLatitud || 0);
   const lng = Number(incident?.incLongitud || 0);
-  const mapsUrl = lat && lng ? `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}` : '';
+  const routeOrigin = currentPosition || guardLocation;
+  const pointMapsUrl = lat && lng ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` : '';
+  const routeMapsUrl = lat && lng
+    ? `https://www.google.com/maps/dir/?api=1${routeOrigin ? `&origin=${routeOrigin.latitude},${routeOrigin.longitude}` : ''}&destination=${lat},${lng}`
+    : '';
+  const embedMapsUrl = lat && lng
+    ? routeOrigin
+      ? `https://maps.google.com/maps?saddr=${routeOrigin.latitude},${routeOrigin.longitude}&daddr=${lat},${lng}&z=17&output=embed`
+      : `https://maps.google.com/maps?q=${lat},${lng}&z=18&output=embed`
+    : '';
+
+  useEffect(() => {
+    if (!id) return undefined;
+
+    const userId = user?.id || 'detalle';
+    const role = user?.rol || user?.Rol || 'Estudiante';
+    const separator = hubUrl('/hubs/alerts').includes('?') ? '&' : '?';
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(`${hubUrl('/hubs/alerts')}${separator}userId=${encodeURIComponent(userId)}&role=${encodeURIComponent(role)}`)
+      .withAutomaticReconnect()
+      .build();
+
+    connection.on('ReceiveGuardLocation', (location) => {
+      if (!location?.incidentId || String(location.incidentId) !== String(id)) {
+        return;
+      }
+
+      setGuardLocation({
+        guardId: location.guardId,
+        guardName: location.guardName || 'Guardia',
+        latitude: Number(location.latitude),
+        longitude: Number(location.longitude),
+        updatedAt: location.updatedAt,
+      });
+    });
+
+    connection.start().catch(() => {});
+
+    return () => {
+      connection.off('ReceiveGuardLocation');
+      connection.stop().catch(() => {});
+    };
+  }, [id, user]);
 
   const locate = async () => {
     const coords = await getCurrentPosition();
@@ -1018,8 +1158,15 @@ function IncidentDetailPage() {
             <InfoRow label="Hora" value={formatDateTime(incident.incFechaReporte)} />
             <InfoRow label="Coordenadas" value={lat && lng ? `${lat}, ${lng}` : 'No disponible'} />
             {currentPosition ? <InfoRow label="Tu ubicacion" value={`${currentPosition.latitude}, ${currentPosition.longitude}`} /> : null}
+            {guardLocation ? <InfoRow label="Guardia en ruta" value={`${guardLocation.guardName}: ${guardLocation.latitude}, ${guardLocation.longitude}`} /> : null}
+            {embedMapsUrl ? (
+              <div className="map-embed">
+                <iframe title="Mapa del incidente" src={embedMapsUrl} loading="lazy" />
+              </div>
+            ) : null}
             <IonButton expand="block" fill="outline" onClick={locate}><IonIcon icon={locateOutline} slot="start" />Obtener mi ubicacion</IonButton>
-            {mapsUrl ? <IonButton expand="block" href={mapsUrl} target="_blank"><IonIcon icon={mapOutline} slot="start" />Abrir ruta en Maps</IonButton> : null}
+            {pointMapsUrl ? <IonButton expand="block" fill="outline" href={pointMapsUrl} target="_blank"><IonIcon icon={mapOutline} slot="start" />Abrir coordenadas en Google Maps</IonButton> : null}
+            {routeMapsUrl ? <IonButton expand="block" href={routeMapsUrl} target="_blank"><IonIcon icon={mapOutline} slot="start" />Abrir ruta en Google Maps</IonButton> : null}
           </section>
         )}
       </main>
@@ -1072,6 +1219,29 @@ function InfoRow({ label, value }) {
 }
 
 async function getCurrentPosition() {
+  if (Capacitor.isNativePlatform()) {
+    let permission = await Geolocation.checkPermissions();
+    if (permission.location !== 'granted') {
+      permission = await Geolocation.requestPermissions();
+    }
+
+    if (permission.location !== 'granted') {
+      throw new Error('Activa el permiso de ubicacion para enviar coordenadas reales.');
+    }
+
+    const position = await Geolocation.getCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0,
+    });
+
+    return {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+    };
+  }
+
   if (!navigator.geolocation) {
     throw new Error('El dispositivo no soporta geolocalizacion.');
   }
@@ -1081,6 +1251,7 @@ async function getCurrentPosition() {
       (position) => resolve({
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
       }),
       () => reject(new Error('No se pudo obtener ubicacion GPS.')),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
